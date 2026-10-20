@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Folder tree with Git status: added, modified and conflict">
+<rect width="128" height="128" rx="24" fill="#1F2230"></rect>
+<g stroke="#5A6078" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<path d="M24 31 V107 M24 41 H31 M24 85 H31 M24 107 H31"></path>
+<path d="M44 51 V63 H51"></path>
+</g>
+<rect x="14" y="10" width="11" height="6" rx="2" fill="#F2A93B"></rect>
+<rect x="14" y="13" width="22" height="17" rx="3" fill="#F2A93B"></rect>
+<rect x="42" y="18" width="72" height="6" rx="3" fill="#F2A93B" opacity="0.45"></rect>
+<rect x="32" y="32" width="10" height="6" rx="2" fill="#F0525A"></rect>
+<rect x="32" y="35" width="22" height="15" rx="3" fill="#F0525A"></rect>
+<rect x="60" y="39" width="54" height="6" rx="3" fill="#F0525A" opacity="0.45"></rect>
+<path d="M52 54 H61 L66 59 V72 H52 Z" fill="#F0525A" stroke="#F0525A" stroke-width="1.5" stroke-linejoin="round"></path>
+<path d="M59 58 V65" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"></path>
+<circle cx="59" cy="69" r="1.4" fill="#FFFFFF"></circle>
+<rect x="72" y="60" width="42" height="6" rx="3" fill="#F0525A" opacity="0.45"></rect>
+<path d="M32 76 H41 L46 81 V94 H32 Z" fill="#3FBF7F" stroke="#3FBF7F" stroke-width="1.5" stroke-linejoin="round"></path>
+<path d="M39 81 V89 M35 85 H43" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"></path>
+<rect x="52" y="82" width="62" height="6" rx="3" fill="#3FBF7F" opacity="0.45"></rect>
+<path d="M32 98 H41 L46 103 V116 H32 Z" fill="#F2A93B" stroke="#F2A93B" stroke-width="1.5" stroke-linejoin="round"></path>
+<circle cx="39" cy="108" r="2.6" fill="#FFFFFF"></circle>
+<rect x="52" y="104" width="50" height="6" rx="3" fill="#F2A93B" opacity="0.45"></rect>
+</svg>

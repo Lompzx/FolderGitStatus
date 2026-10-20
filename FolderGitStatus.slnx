@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="LICENSE" />
+    <File Path="publishManifest.json" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="src/FolderGitStatus/FolderGitStatus.csproj" />
+</Solution>

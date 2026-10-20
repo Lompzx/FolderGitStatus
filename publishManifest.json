@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json.schemastore.org/vsix-publish",
+  "categories": [ "source control", "coding" ],
+  "identity": {
+    "internalName": "FolderGitStatus"
+  },
+  "overview": "README.md",
+  "priceCategory": "free",
+  "publisher": "TiagoGOliveira",
+  "private": false,
+  "qna": true,
+  "repo": "https://github.com/Lompzx/FolderGitStatus",
+  "assetFiles": [
+    {
+      "pathOnDisk": "docs/images/solution-explorer.png",
+      "targetPath": "docs/images/solution-explorer.png"
+    },
+    {
+      "pathOnDisk": "docs/images/options.png",
+      "targetPath": "docs/images/options.png"
+    }
+  ]
+}
