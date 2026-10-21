@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -40,7 +41,12 @@ namespace FolderGitStatus
         private Brush _addedBrush, _modifiedBrush, _conflictBrush;
         private readonly HashSet<ListBox> _treeViews = new HashSet<ListBox>();
         private readonly HashSet<ListBox> _pendingSweeps = new HashSet<ListBox>();
+        private static readonly TimeSpan FastDiscoveryInterval = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan SlowDiscoveryInterval = TimeSpan.FromSeconds(10);
+        private const int FastDiscoveryAttempts = 15;
+
         private readonly DispatcherTimer _discoveryTimer;
+        private readonly Stopwatch _discoveryClock = new Stopwatch();
         private int _discoveryAttempts;
         private int _repaintQueued;
         private int _sweepCount, _hookedCount, _paintedCount, _noLabelCount;
@@ -65,21 +71,30 @@ namespace FolderGitStatus
             };
 
             // The Solution Explorer tree may not exist yet (window closed or solution still loading).
-            _discoveryTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(2) };
+            _discoveryTimer = new DispatcherTimer(DispatcherPriority.Background);
             _discoveryTimer.Tick += (s, e) => DiscoverTreeViews();
-            StartDiscovery();
+            StartDiscovery("package loaded");
         }
 
         /// <summary>
-        /// Looks for the Solution Explorer tree for a few seconds (called on load and when a solution is opened).
+        /// Looks for the Solution Explorer tree until it is found (called on load and when a solution
+        /// or folder is opened). The first attempts are frequent; after that it keeps looking less often,
+        /// because the first launch after an install can take a long time while VS rebuilds its caches.
         /// </summary>
-        public void StartDiscovery()
+        public void StartDiscovery(string reason)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            Log.Write($"Looking for the Solution Explorer tree ({reason})");
+            _discoveryTimer.Stop();
+            _discoveryTimer.Interval = FastDiscoveryInterval;
             _discoveryAttempts = 0;
-            DiscoverTreeViews();
-            _discoveryTimer.Start();
+            _discoveryClock.Restart();
+
+            if (!DiscoverTreeViews())
+            {
+                _discoveryTimer.Start();
+            }
         }
 
         public void LogStatistics()
@@ -88,24 +103,37 @@ namespace FolderGitStatus
                 $"active={_containers.Count}, painted={_paintedCount}, no label={_noLabelCount}");
         }
 
-        private void DiscoverTreeViews()
+        private bool DiscoverTreeViews()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            _discoveryAttempts++;
             var found = false;
             foreach (Window window in Application.Current.Windows)
             {
                 foreach (var treeView in VisualTree.Descendants<ListBox>(window).Where(IsHierarchyTreeView).ToList())
                 {
                     found = true;
-                    TrackTreeView(treeView);
+                    if (TrackTreeView(treeView))
+                    {
+                        Log.Write($"Solution Explorer tree found after {_discoveryClock.Elapsed.TotalSeconds:0.0}s " +
+                            $"({_discoveryAttempts} attempt(s)): {treeView.GetType().FullName}");
+                    }
                 }
             }
 
-            if (found || ++_discoveryAttempts >= 15)
+            if (found)
             {
                 _discoveryTimer.Stop();
             }
+            else if (_discoveryAttempts == FastDiscoveryAttempts)
+            {
+                Log.Write($"Solution Explorer tree not found after {_discoveryClock.Elapsed.TotalSeconds:0}s; " +
+                    $"checking every {SlowDiscoveryInterval.TotalSeconds:0}s");
+                _discoveryTimer.Interval = SlowDiscoveryInterval;
+            }
+
+            return found;
         }
 
         // SolutionPivotTreeView : HierarchyPivotTreeView : PivotTreeView : VirtualizingTreeView : ListBox
@@ -117,16 +145,15 @@ namespace FolderGitStatus
         /// for subtrees with instance handlers), so the tree is swept whenever the generator
         /// creates containers: on expand, scroll or solution reload.
         /// </summary>
-        private void TrackTreeView(ListBox treeView)
+        /// <returns>True if the tree was not tracked yet.</returns>
+        private bool TrackTreeView(ListBox treeView)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             if (!_treeViews.Add(treeView))
             {
-                return;
+                return false;
             }
-
-            Log.Debug($"Tree found: {treeView.GetType().FullName}");
 
             var generator = treeView.ItemContainerGenerator;
             generator.StatusChanged += (s, e) =>
@@ -139,6 +166,7 @@ namespace FolderGitStatus
             generator.ItemsChanged += (s, e) => QueueSweep(treeView);
             treeView.Loaded += (s, e) => QueueSweep(treeView);
             QueueSweep(treeView);
+            return true;
         }
 
         private void QueueSweep(ListBox treeView)

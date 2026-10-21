@@ -84,6 +84,10 @@ The installer is produced at `src\FolderGitStatus\bin\Release\net48\FolderGitSta
 └── FolderGitStatus.slnx
 ```
 
+## Changelog
+
+See [CHANGELOG.md](https://github.com/Lompzx/FolderGitStatus/blob/main/CHANGELOG.md).
+
 ## License
 
 [MIT](LICENSE)

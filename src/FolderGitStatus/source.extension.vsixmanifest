@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="FolderGitStatus.FF9E9EEB-B37F-4C58-868E-B959A2C0076C" Version="1.2.0" Language="en-US" Publisher="Tiago G. Oliveira" />
+    <Identity Id="FolderGitStatus.FF9E9EEB-B37F-4C58-868E-B959A2C0076C" Version="1.2.1" Language="en-US" Publisher="Tiago G. Oliveira" />
     <DisplayName>Folder Git Status</DisplayName>
     <Description xml:space="preserve">Colors the folders, projects and solution folders that contain Git changes in Solution Explorer, propagating the state recursively up the tree.</Description>
     <MoreInfo>https://github.com/Lompzx/FolderGitStatus</MoreInfo>

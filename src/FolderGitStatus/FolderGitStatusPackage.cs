@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
@@ -29,13 +30,19 @@ namespace FolderGitStatus
             var options = (OptionsPage)GetDialogPage(typeof(OptionsPage));
             Log.Initialize(await GetServiceAsync(typeof(SVsOutputWindow)) as IVsOutputWindow, () => options.Diagnostics);
 
-            Log.Write($"Package loaded (VS {Application.Current?.MainWindow?.GetType().Assembly.GetName().Version}). Log: {Log.FilePath}");
+            var sinceStartup = DateTime.Now - Process.GetCurrentProcess().StartTime;
+            Log.Write($"Package loaded {sinceStartup.TotalSeconds:0}s after VS started " +
+                $"(VS {Application.Current?.MainWindow?.GetType().Assembly.GetName().Version}). Log: {Log.FilePath}");
 
             _git = new GitStatusService(() => options.GitExecutable);
             _decorator = new SolutionExplorerDecorator(_git, options, JoinableTaskFactory);
 
+            // The package loads in the background while the solution opens, so these events may
+            // have fired already; the decorator's own discovery covers that case.
             SolutionEvents.OnAfterCloseSolution += OnAfterCloseSolution;
             SolutionEvents.OnAfterOpenSolution += OnAfterOpenSolution;
+            SolutionEvents.OnAfterBackgroundSolutionLoadComplete += OnAfterBackgroundSolutionLoadComplete;
+            SolutionEvents.OnAfterOpenFolder += OnAfterOpenFolder;
 
             if (options.Diagnostics)
             {
@@ -67,7 +74,19 @@ namespace FolderGitStatus
         private void OnAfterOpenSolution(object sender, OpenSolutionEventArgs e)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            _decorator?.StartDiscovery();
+            _decorator?.StartDiscovery("solution opened");
+        }
+
+        private void OnAfterBackgroundSolutionLoadComplete(object sender, EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _decorator?.StartDiscovery("solution load completed");
+        }
+
+        private void OnAfterOpenFolder(object sender, FolderEventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _decorator?.StartDiscovery("folder opened");
         }
 
         protected override void Dispose(bool disposing)
@@ -76,6 +95,8 @@ namespace FolderGitStatus
             {
                 SolutionEvents.OnAfterCloseSolution -= OnAfterCloseSolution;
                 SolutionEvents.OnAfterOpenSolution -= OnAfterOpenSolution;
+                SolutionEvents.OnAfterBackgroundSolutionLoadComplete -= OnAfterBackgroundSolutionLoadComplete;
+                SolutionEvents.OnAfterOpenFolder -= OnAfterOpenFolder;
                 _git?.Dispose();
             }
 

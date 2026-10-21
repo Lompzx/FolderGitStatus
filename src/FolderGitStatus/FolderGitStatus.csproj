@@ -5,7 +5,7 @@
     <RootNamespace>FolderGitStatus</RootNamespace>
     <AssemblyName>FolderGitStatus</AssemblyName>
     <LangVersion>latest</LangVersion>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
 
     <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>

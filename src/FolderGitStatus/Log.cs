@@ -8,11 +8,15 @@ namespace FolderGitStatus
     /// <summary>
     /// "Folder Git Status" pane in the Output window and %LOCALAPPDATA%\FolderGitStatus\log.txt
     /// (useful for debugging without access to the VS window). Debug is only logged with "Diagnostic log" on.
+    /// The file keeps previous sessions, so a session that failed is not overwritten by the next one;
+    /// when it grows past <see cref="MaxFileSize"/> it is moved to log.old.txt.
     /// </summary>
     internal static class Log
     {
         public static readonly string FilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FolderGitStatus", "log.txt");
+
+        private const long MaxFileSize = 512 * 1024;
 
         private static readonly object FileGate = new object();
         private static Guid PaneGuid = new Guid("4E1C2B7A-0F7D-4C8E-9C55-2B1D6A3F9E10");
@@ -32,11 +36,22 @@ namespace FolderGitStatus
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-                File.WriteAllText(FilePath, string.Empty);
+
+                var file = new FileInfo(FilePath);
+                if (file.Exists && file.Length > MaxFileSize)
+                {
+                    File.Copy(FilePath, Path.ChangeExtension(FilePath, ".old.txt"), overwrite: true);
+                    File.WriteAllText(FilePath, string.Empty);
+                }
             }
             catch (IOException)
             {
             }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            WriteToFile($"{Environment.NewLine}===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} =====" + Environment.NewLine);
         }
 
         public static void Write(string message)
