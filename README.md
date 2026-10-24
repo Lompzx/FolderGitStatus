@@ -4,7 +4,7 @@ Visual Studio extension that colors the folders, projects, solution folders and 
 
 Visual Studio shows a glyph on a changed file, but nothing on the folders above it. With this extension the whole tree inherits the state of the files inside it: if a file three levels down is modified, every folder up to the solution is colored.
 
-![Solution Explorer with changed folders and files colored](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/solution-explorer.png)
+![Editing, adding and committing files while Solution Explorer updates its colors](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/demo.gif)
 
 ## Colors
 
@@ -15,6 +15,8 @@ Visual Studio shows a glyph on a changed file, but nothing on the folders above 
 | 🟠 Amber | Contains files with merge conflicts |
 
 When a folder has changes of different kinds, the most severe one wins: conflict > modified > new.
+
+![Solution Explorer with changed folders and files colored](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/solution-explorer.png)
 
 ## Features
 
@@ -79,7 +81,7 @@ The installer is produced at `src\FolderGitStatus\bin\Release\net48\FolderGitSta
 │   ├── FolderGitStatusPackage.cs
 │   ├── OptionsPage.cs
 │   └── source.extension.vsixmanifest
-├── docs/images/                screenshots used by this README and the Marketplace page
+├── docs/images/                screenshots and demo GIF used by this README and the Marketplace page
 ├── publishManifest.json        Marketplace metadata (VsixPublisher)
 └── FolderGitStatus.slnx
 ```

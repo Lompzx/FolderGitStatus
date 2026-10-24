@@ -12,6 +12,10 @@
   "repo": "https://github.com/Lompzx/FolderGitStatus",
   "assetFiles": [
     {
+      "pathOnDisk": "docs/images/demo.gif",
+      "targetPath": "docs/images/demo.gif"
+    },
+    {
       "pathOnDisk": "docs/images/solution-explorer.png",
       "targetPath": "docs/images/solution-explorer.png"
     },
