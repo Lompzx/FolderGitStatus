@@ -5,7 +5,8 @@ using System.Linq;
 namespace FolderGitStatus
 {
     /// <summary>
-    /// Immutable result of a "git status": status per file and, already propagated, per folder.
+    /// Immutable result of a "git status" (or of a "git diff" between commits): status per file
+    /// and, already propagated, per folder.
     /// </summary>
     internal sealed class StatusSnapshot
     {
@@ -55,17 +56,48 @@ namespace FolderGitStatus
                     i++;
                 }
 
-                var status = Classify(x, y);
-                var path = Path.Combine(root, entry.Substring(3).Replace('/', '\\')).TrimEnd('\\');
-
-                Merge(files, path, status);
-                for (var dir = Path.GetDirectoryName(path); dir != null && dir.Length >= root.Length; dir = Path.GetDirectoryName(dir))
-                {
-                    Merge(directories, dir, status);
-                }
+                Add(files, directories, root, entry.Substring(3), Classify(x, y));
             }
 
             return new StatusSnapshot(files, directories);
+        }
+
+        /// <summary>
+        /// Parses the output of "git diff --name-status -z": each entry is the status letter
+        /// followed by the path; renames and copies ("R100", "C75") have the source path first.
+        /// A renamed file counts as modified and a copy as added, like in <see cref="Parse"/>.
+        /// </summary>
+        public static StatusSnapshot ParseNameStatus(string root, string output)
+        {
+            var files = new Dictionary<string, GitStatus>(PathUtil.Comparer);
+            var directories = new Dictionary<string, GitStatus>(PathUtil.Comparer);
+            var entries = output.Split(new[] { '\0' }, System.StringSplitOptions.RemoveEmptyEntries);
+
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var letter = entries[i][0];
+                i += letter == 'R' || letter == 'C' ? 2 : 1;
+                if (i >= entries.Length)
+                {
+                    break;
+                }
+
+                Add(files, directories, root, entries[i], letter == 'A' || letter == 'C' ? GitStatus.Added : GitStatus.Modified);
+            }
+
+            return new StatusSnapshot(files, directories);
+        }
+
+        private static void Add(Dictionary<string, GitStatus> files, Dictionary<string, GitStatus> directories,
+            string root, string relativePath, GitStatus status)
+        {
+            var path = Path.Combine(root, relativePath.Replace('/', '\\')).TrimEnd('\\');
+
+            Merge(files, path, status);
+            for (var dir = Path.GetDirectoryName(path); dir != null && dir.Length >= root.Length; dir = Path.GetDirectoryName(dir))
+            {
+                Merge(directories, dir, status);
+            }
         }
 
         private static GitStatus Classify(char x, char y)

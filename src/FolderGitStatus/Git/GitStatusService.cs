@@ -10,16 +10,16 @@ namespace FolderGitStatus
     /// </summary>
     internal sealed class GitStatusService : IDisposable
     {
-        private readonly Func<string> _gitExecutable;
+        private readonly OptionsPage _options;
         private readonly object _gate = new object();
 
         // null value = path outside any repository
         private readonly Dictionary<string, string> _rootByDirectory = new Dictionary<string, string>(PathUtil.Comparer);
         private readonly Dictionary<string, GitRepository> _repositories = new Dictionary<string, GitRepository>(PathUtil.Comparer);
 
-        public GitStatusService(Func<string> gitExecutable)
+        public GitStatusService(OptionsPage options)
         {
-            _gitExecutable = gitExecutable;
+            _options = options;
         }
 
         /// <summary>
@@ -29,14 +29,37 @@ namespace FolderGitStatus
 
         /// <param name="path">Normalized path (<see cref="PathUtil.Normalize"/>).</param>
         /// <param name="includeFiles">If false, only folders get a status.</param>
-        public GitStatus GetStatus(string path, bool includeFiles)
+        /// <remarks>Uncommitted changes win; committed branch changes only show where there are none.</remarks>
+        public ItemStatus GetStatus(string path, bool includeFiles)
         {
-            var snapshot = FindRepository(path)?.Snapshot;
-            if (snapshot == null)
+            var repository = FindRepository(path);
+            if (repository == null)
             {
-                return GitStatus.None;
+                return ItemStatus.None;
             }
 
+            var pending = Lookup(repository.Snapshot, path, includeFiles);
+            return pending != GitStatus.None
+                ? new ItemStatus(pending, committed: false)
+                : new ItemStatus(Lookup(repository.BranchSnapshot, path, includeFiles), committed: true);
+        }
+
+        /// <summary>
+        /// Recomputes every repository (after the options change).
+        /// </summary>
+        public void Refresh()
+        {
+            lock (_gate)
+            {
+                foreach (var repository in _repositories.Values)
+                {
+                    repository.Invalidate();
+                }
+            }
+        }
+
+        private static GitStatus Lookup(StatusSnapshot snapshot, string path, bool includeFiles)
+        {
             var status = snapshot.GetDirectoryStatus(path);
             return status == GitStatus.None && includeFiles ? snapshot.GetFileStatus(path) : status;
         }
@@ -74,7 +97,7 @@ namespace FolderGitStatus
 
                 if (!_repositories.TryGetValue(root, out var repository))
                 {
-                    repository = new GitRepository(root, _gitExecutable);
+                    repository = new GitRepository(root, _options);
                     repository.Changed += (s, e) => StatusChanged?.Invoke(this, EventArgs.Empty);
                     _repositories.Add(root, repository);
                     Log.Write($"Watching repository: {root}");

@@ -33,8 +33,11 @@ namespace FolderGitStatus
             var sinceStartup = DateTime.Now - Process.GetCurrentProcess().StartTime;
             Log.Write($"Package loaded {sinceStartup.TotalSeconds:0}s after VS started " +
                 $"(VS {Application.Current?.MainWindow?.GetType().Assembly.GetName().Version}). Log: {Log.FilePath}");
+            Log.Write($"Options: Enabled={options.Enabled}, ColorizeFiles={options.ColorizeFiles}, " +
+                $"ShowBranchChanges={options.ShowBranchChanges}, BaseBranch=\"{options.BaseBranch}\", Diagnostics={options.Diagnostics}");
 
-            _git = new GitStatusService(() => options.GitExecutable);
+            _git = new GitStatusService(options);
+            options.Applied += (s, e) => _git.Refresh();
             _decorator = new SolutionExplorerDecorator(_git, options, JoinableTaskFactory);
 
             // The package loads in the background while the solution opens, so these events may

@@ -16,10 +16,19 @@ Visual Studio shows a glyph on a changed file, but nothing on the folders above 
 
 When a folder has changes of different kinds, the most severe one wins: conflict > modified > new.
 
+### Branch changes
+
+With **Show branch changes** on, items changed by the commits of the current branch are also colored, in a lighter tone of the same colors. This shows everything the branch touched since it left the base branch (useful when reviewing a pull request or coming back to a feature), not only what is still uncommitted.
+
+Uncommitted changes always keep the full color and take precedence: a folder with pending changes is shown in full color even if the branch also committed changes inside it.
+
+The base branch is detected from the remote's default branch (`origin/HEAD`), falling back to `origin/main`, `origin/master`, `main` or `master`, or can be set in the options. A base branch set in the options applies to every repository; where it does not exist, the automatic detection is used. The comparison is `git diff <base>...HEAD`, so commits that only exist on the base branch are not counted.
+
 ![Solution Explorer with changed folders and files colored](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/solution-explorer.png)
 
 ## Features
 
+- Optional branch mode: also shows, in a lighter tone, what the commits of the current branch changed compared to the base branch.
 - Recursive propagation up to the root: physical folders, projects, solution folders (including `.slnx`) and the solution node.
 - Automatic refresh when files are saved, created, deleted or renamed, and on stage, commit, checkout or merge.
 - Multiple repositories and submodules in the same solution.
@@ -41,6 +50,9 @@ Under **Tools > Options > Folder Git Status > General**:
 | Colorize files | True | Also colors the names of changed files |
 | Bold | False | Shows items with changes in bold |
 | Modified / Added / Conflict | Red / Green / Amber | Color for each status |
+| Committed changes opacity (%) | 55 | Opacity of the colors for changes that are only in commits of the branch |
+| Show branch changes | False | Also colors the items changed by the commits of the current branch |
+| Base branch | *(empty)* | Branch to compare with; empty detects it automatically |
 | Git executable | `git` | Path to `git.exe` |
 | Diagnostic log | False | Writes details to the Output window and to `%LOCALAPPDATA%\FolderGitStatus\log.txt` |
 
@@ -50,7 +62,7 @@ Under **Tools > Options > Folder Git Status > General**:
 
 Visual Studio has no public API to decorate Solution Explorer items. The extension:
 
-1. Runs `git --no-optional-locks status --porcelain=v1 -z` in the background and computes each folder's status from the changed files.
+1. Runs `git --no-optional-locks status --porcelain=v1 -z` in the background and computes each folder's status from the changed files. With branch changes on, it also runs `git diff --name-status -z <base>...HEAD`.
 2. Watches the working tree and the Git index with `FileSystemWatcher` and reruns the status (debounced) when something changes.
 3. Finds the Solution Explorer tree and, for each visible item, resolves its physical path through `IVsHierarchy` and colors the name text.
 

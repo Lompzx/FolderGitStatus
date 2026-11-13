@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-13
+
+### Added
+- **Show branch changes** option: also colors the items changed by the commits of the current branch that are not in the base branch (`git diff <base>...HEAD`), in a lighter tone of the same colors. Uncommitted changes keep the full color and take precedence.
+- **Base branch** option. It applies to every repository; where it does not exist, or when it is empty, the base is the remote's default branch (`origin/HEAD`), or else `origin/main`, `origin/master`, `main` or `master`. It is looked up again after commits, checkouts and fetches.
+- **Committed changes opacity (%)** option (default 55) for the lighter tone.
+
+### Changed
+- Changing the options recomputes the status of every repository right away.
+
 ## [1.2.2] - 2026-11-13
 
 ### Fixed
@@ -43,5 +53,6 @@ First release.
 - Support for multiple repositories and submodules in the same solution, and for *Open Folder* mode.
 - Options for the colors, bold text, the path to `git.exe` and a diagnostic log.
 
+[1.3.0]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.3.0
 [1.2.2]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.2.1

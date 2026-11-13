@@ -25,7 +25,7 @@ namespace FolderGitStatus
             _options = options;
         }
 
-        public GitStatus GetStatus(IVsHierarchyItem item)
+        public ItemStatus GetStatus(IVsHierarchyItem item)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -42,7 +42,7 @@ namespace FolderGitStatus
         /// <summary>
         /// Root of a hierarchy: solution, project or solution folder.
         /// </summary>
-        private GitStatus GetRootStatus(IVsHierarchy hierarchy, int depth)
+        private ItemStatus GetRootStatus(IVsHierarchy hierarchy, int depth)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -60,7 +60,7 @@ namespace FolderGitStatus
 
             if (path == null)
             {
-                return GitStatus.None;
+                return ItemStatus.None;
             }
 
             // Project/solution: the canonical name is the .csproj/.sln; what matters is its folder.
@@ -72,18 +72,18 @@ namespace FolderGitStatus
             return _git.GetStatus(path, includeFiles: false);
         }
 
-        private GitStatus GetChildrenStatus(IVsHierarchy hierarchy, uint parentId, int depth)
+        private ItemStatus GetChildrenStatus(IVsHierarchy hierarchy, uint parentId, int depth)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             if (depth > MaxSolutionFolderDepth)
             {
-                return GitStatus.None;
+                return ItemStatus.None;
             }
 
-            var result = GitStatus.None;
+            var result = ItemStatus.None;
             for (var child = GetItemId(hierarchy, parentId, __VSHPROPID.VSHPROPID_FirstChild);
-                 child != VSConstants.VSITEMID_NIL && result != GitStatus.Conflict;
+                 child != VSConstants.VSITEMID_NIL && !(result.Kind == GitStatus.Conflict && !result.Committed);
                  child = GetItemId(hierarchy, child, __VSHPROPID.VSHPROPID_NextSibling))
             {
                 var nested = GetNestedHierarchy(hierarchy, child);
@@ -91,7 +91,7 @@ namespace FolderGitStatus
                     ? GetRootStatus(nested, depth + 1)
                     : _git.GetStatus(GetCanonicalPath(hierarchy, child), includeFiles: true); // "solution items"
 
-                if (status > result)
+                if (status.IsMoreRelevantThan(result))
                 {
                     result = status;
                 }

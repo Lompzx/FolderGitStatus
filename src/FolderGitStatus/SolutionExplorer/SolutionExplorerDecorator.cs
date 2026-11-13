@@ -42,6 +42,7 @@ namespace FolderGitStatus
         private readonly HashSet<Type> _reportedTypes = new HashSet<Type>();
         private readonly ConditionalWeakTable<TextBlock, OriginalLook> _originals = new ConditionalWeakTable<TextBlock, OriginalLook>();
         private Brush _addedBrush, _modifiedBrush, _conflictBrush;
+        private Brush _committedAddedBrush, _committedModifiedBrush, _committedConflictBrush;
         private readonly HashSet<ListBox> _pendingSweeps = new HashSet<ListBox>();
         private static readonly TimeSpan FastDiscoveryInterval = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan SlowDiscoveryInterval = TimeSpan.FromSeconds(10);
@@ -325,13 +326,13 @@ namespace FolderGitStatus
                 return;
             }
 
-            var status = GitStatus.None;
+            var status = ItemStatus.None;
             if (item != null && _options.Enabled)
             {
                 try
                 {
                     status = _resolver.GetStatus(item);
-                    if (status != GitStatus.None && _paintedCount++ < 10)
+                    if (!status.IsNone && _paintedCount++ < 10)
                     {
                         Log.Debug($"Painting '{item.Text}' as {status}");
                     }
@@ -345,12 +346,9 @@ namespace FolderGitStatus
             Paint(label, status);
         }
 
-        private void Paint(TextBlock label, GitStatus status)
+        private void Paint(TextBlock label, ItemStatus status)
         {
-            var brush = status == GitStatus.Conflict ? _conflictBrush
-                : status == GitStatus.Modified ? _modifiedBrush
-                : status == GitStatus.Added ? _addedBrush
-                : null;
+            var brush = GetBrush(status);
 
             if (brush == null)
             {
@@ -467,16 +465,36 @@ namespace FolderGitStatus
                 $"Owner: {owner.GetType().FullName}; DataContext: {dataContextType.FullName} {{ {properties} }}");
         }
 
-        private void UpdateBrushes()
+        private Brush GetBrush(ItemStatus status)
         {
-            _addedBrush = ToBrush(_options.AddedColor);
-            _modifiedBrush = ToBrush(_options.ModifiedColor);
-            _conflictBrush = ToBrush(_options.ConflictColor);
+            switch (status.Kind)
+            {
+                case GitStatus.Conflict: return status.Committed ? _committedConflictBrush : _conflictBrush;
+                case GitStatus.Modified: return status.Committed ? _committedModifiedBrush : _modifiedBrush;
+                case GitStatus.Added: return status.Committed ? _committedAddedBrush : _addedBrush;
+                default: return null;
+            }
         }
 
-        private static Brush ToBrush(System.Drawing.Color color)
+        /// <summary>
+        /// Committed branch changes use the same colors with reduced opacity, so they blend
+        /// towards the background in both light and dark themes.
+        /// </summary>
+        private void UpdateBrushes()
         {
-            var brush = new SolidColorBrush(Color.FromArgb(color.A, color.R, color.G, color.B));
+            var committedOpacity = Math.Max(10, Math.Min(100, _options.CommittedOpacity)) / 100.0;
+
+            _addedBrush = ToBrush(_options.AddedColor, 1);
+            _modifiedBrush = ToBrush(_options.ModifiedColor, 1);
+            _conflictBrush = ToBrush(_options.ConflictColor, 1);
+            _committedAddedBrush = ToBrush(_options.AddedColor, committedOpacity);
+            _committedModifiedBrush = ToBrush(_options.ModifiedColor, committedOpacity);
+            _committedConflictBrush = ToBrush(_options.ConflictColor, committedOpacity);
+        }
+
+        private static Brush ToBrush(System.Drawing.Color color, double opacity)
+        {
+            var brush = new SolidColorBrush(Color.FromArgb((byte)Math.Round(color.A * opacity), color.R, color.G, color.B));
             brush.Freeze();
             return brush;
         }
