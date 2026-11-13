@@ -16,6 +16,10 @@
       "targetPath": "docs/images/demo.gif"
     },
     {
+      "pathOnDisk": "docs/images/branch-changes.gif",
+      "targetPath": "docs/images/branch-changes.gif"
+    },
+    {
       "pathOnDisk": "docs/images/solution-explorer.png",
       "targetPath": "docs/images/solution-explorer.png"
     },

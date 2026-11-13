@@ -20,6 +20,8 @@ When a folder has changes of different kinds, the most severe one wins: conflict
 
 With **Show branch changes** on, items changed by the commits of the current branch are also colored, in a lighter tone of the same colors. This shows everything the branch touched since it left the base branch (useful when reviewing a pull request or coming back to a feature), not only what is still uncommitted.
 
+![On a feature branch, the committed changes show in a lighter tone; an uncommitted edit shows in full color and turns lighter after the commit](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/branch-changes.gif)
+
 Uncommitted changes always keep the full color and take precedence: a folder with pending changes is shown in full color even if the branch also committed changes inside it.
 
 The base branch is detected from the remote's default branch (`origin/HEAD`), falling back to `origin/main`, `origin/master`, `main` or `master`, or can be set in the options. A base branch set in the options applies to every repository; where it does not exist, the automatic detection is used. The comparison is `git diff <base>...HEAD`, so commits that only exist on the base branch are not counted.
