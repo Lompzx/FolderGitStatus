@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-11-13
+
+### Fixed
+- The extension could stop coloring Solution Explorer until Visual Studio was restarted (seen on the first launch after updating to Visual Studio 2026 18.12). The tree was looked up only once, so if Visual Studio replaced it with a new one (for example while rebuilding the window layout after an update, or when the window was redocked), the new tree was never colored. The search now starts again whenever the tracked tree leaves the screen, and ends as soon as a tree is shown again.
+
 ## [1.2.1] - 2026-10-21
 
 ### Fixed
@@ -38,4 +43,5 @@ First release.
 - Support for multiple repositories and submodules in the same solution, and for *Open Folder* mode.
 - Options for the colors, bold text, the path to `git.exe` and a diagnostic log.
 
+[1.2.2]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.2.1

@@ -25,6 +25,9 @@ namespace FolderGitStatus
         private static readonly DependencyProperty IsHookedProperty =
             DependencyProperty.RegisterAttached("IsHooked", typeof(bool), typeof(SolutionExplorerDecorator));
 
+        private static readonly DependencyProperty IsTrackedProperty =
+            DependencyProperty.RegisterAttached("IsTracked", typeof(bool), typeof(SolutionExplorerDecorator));
+
         private static readonly DependencyProperty LabelProperty =
             DependencyProperty.RegisterAttached("Label", typeof(TextBlock), typeof(SolutionExplorerDecorator));
 
@@ -39,7 +42,6 @@ namespace FolderGitStatus
         private readonly HashSet<Type> _reportedTypes = new HashSet<Type>();
         private readonly ConditionalWeakTable<TextBlock, OriginalLook> _originals = new ConditionalWeakTable<TextBlock, OriginalLook>();
         private Brush _addedBrush, _modifiedBrush, _conflictBrush;
-        private readonly HashSet<ListBox> _treeViews = new HashSet<ListBox>();
         private readonly HashSet<ListBox> _pendingSweeps = new HashSet<ListBox>();
         private static readonly TimeSpan FastDiscoveryInterval = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan SlowDiscoveryInterval = TimeSpan.FromSeconds(10);
@@ -48,8 +50,9 @@ namespace FolderGitStatus
         private readonly DispatcherTimer _discoveryTimer;
         private readonly Stopwatch _discoveryClock = new Stopwatch();
         private int _discoveryAttempts;
+        private bool _discoveryQuiet;
         private int _repaintQueued;
-        private int _sweepCount, _hookedCount, _paintedCount, _noLabelCount;
+        private int _treeCount, _sweepCount, _hookedCount, _paintedCount, _noLabelCount;
 
         public SolutionExplorerDecorator(GitStatusService git, OptionsPage options, JoinableTaskFactory joinableTaskFactory)
         {
@@ -81,11 +84,14 @@ namespace FolderGitStatus
         /// or folder is opened). The first attempts are frequent; after that it keeps looking less often,
         /// because the first launch after an install can take a long time while VS rebuilds its caches.
         /// </summary>
-        public void StartDiscovery(string reason)
+        /// <param name="quiet">Only log the search with "Diagnostic log" on (used when the tree is
+        /// merely hidden, e.g. another tab of its dock group was selected).</param>
+        public void StartDiscovery(string reason, bool quiet = false)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            Log.Write($"Looking for the Solution Explorer tree ({reason})");
+            _discoveryQuiet = quiet;
+            LogDiscovery($"Looking for the Solution Explorer tree ({reason})");
             _discoveryTimer.Stop();
             _discoveryTimer.Interval = FastDiscoveryInterval;
             _discoveryAttempts = 0;
@@ -99,7 +105,7 @@ namespace FolderGitStatus
 
         public void LogStatistics()
         {
-            Log.Debug($"Statistics: trees={_treeViews.Count}, sweeps={_sweepCount}, hooked={_hookedCount}, " +
+            Log.Debug($"Statistics: trees={_treeCount}, sweeps={_sweepCount}, hooked={_hookedCount}, " +
                 $"active={_containers.Count}, painted={_paintedCount}, no label={_noLabelCount}");
         }
 
@@ -128,12 +134,42 @@ namespace FolderGitStatus
             }
             else if (_discoveryAttempts == FastDiscoveryAttempts)
             {
-                Log.Write($"Solution Explorer tree not found after {_discoveryClock.Elapsed.TotalSeconds:0}s; " +
+                LogDiscovery($"Solution Explorer tree not found after {_discoveryClock.Elapsed.TotalSeconds:0}s; " +
                     $"checking every {SlowDiscoveryInterval.TotalSeconds:0}s");
                 _discoveryTimer.Interval = SlowDiscoveryInterval;
             }
 
             return found;
+        }
+
+        private void LogDiscovery(string message)
+        {
+            if (_discoveryQuiet)
+            {
+                Log.Debug(message);
+            }
+            else
+            {
+                Log.Write(message);
+            }
+        }
+
+        /// <summary>
+        /// VS can discard the Solution Explorer tree and create a new one (e.g. when it rebuilds the
+        /// window layout on the first launch after an update, or when the window is redocked), and
+        /// the new tree would never be colored. Whenever a tracked tree leaves the screen the search
+        /// starts again; if it was only hidden, it ends as soon as the same tree is shown again.
+        /// </summary>
+        private void OnTreeViewUnloaded(ListBox treeView)
+        {
+            RunOnUIThread(() =>
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                if (!treeView.IsLoaded && !_discoveryTimer.IsEnabled)
+                {
+                    StartDiscovery("tree left the screen", quiet: true);
+                }
+            }, "Rediscover");
         }
 
         // SolutionPivotTreeView : HierarchyPivotTreeView : PivotTreeView : VirtualizingTreeView : ListBox
@@ -150,10 +186,13 @@ namespace FolderGitStatus
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (!_treeViews.Add(treeView))
+            if ((bool)treeView.GetValue(IsTrackedProperty))
             {
                 return false;
             }
+
+            treeView.SetValue(IsTrackedProperty, true);
+            _treeCount++;
 
             var generator = treeView.ItemContainerGenerator;
             generator.StatusChanged += (s, e) =>
@@ -165,6 +204,7 @@ namespace FolderGitStatus
             };
             generator.ItemsChanged += (s, e) => QueueSweep(treeView);
             treeView.Loaded += (s, e) => QueueSweep(treeView);
+            treeView.Unloaded += (s, e) => OnTreeViewUnloaded(treeView);
             QueueSweep(treeView);
             return true;
         }
