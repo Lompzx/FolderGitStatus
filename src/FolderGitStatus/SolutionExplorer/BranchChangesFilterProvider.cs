@@ -100,6 +100,7 @@ namespace FolderGitStatus
 
             _source.CollectionChanged += OnSourceChanged;
             _git.StatusChanged += OnStatusChanged;
+            Log.Debug($"Branch Changes filter: {_included.Count} of {source.Count} items included");
         }
 
         public event NotifyCollectionChangedEventHandler CollectionChanged;
@@ -185,6 +186,7 @@ namespace FolderGitStatus
             }
 
             var included = new HashSet<IVsHierarchyItem>(_source.Where(IsIncluded));
+            Log.Debug($"Branch Changes filter: re-evaluated, {included.Count} of {_source.Count} items included (was {_included.Count})");
 
             foreach (var item in _included.Where(i => !included.Contains(i)).ToList())
             {
@@ -213,7 +215,9 @@ namespace FolderGitStatus
             _source.CollectionChanged -= OnSourceChanged;
             _git.StatusChanged -= OnStatusChanged;
             _branchChanges.Dispose();
-            (_source as IDisposable)?.Dispose();
+
+            // The source set is not disposed: IVsHierarchyItemCollectionProvider caches it and
+            // returns the same instance the next time the filter is turned on.
         }
     }
 }
