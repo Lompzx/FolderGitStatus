@@ -48,7 +48,7 @@ namespace FolderGitStatus
 
             if (IsSolutionFolder(hierarchy))
             {
-                return GetChildrenStatus(hierarchy, VSConstants.VSITEMID_ROOT, depth);
+                return GetChildrenStatus(hierarchy, VSConstants.VSITEMID_ROOT, depth).AsAggregate();
             }
 
             var path = GetCanonicalPath(hierarchy, VSConstants.VSITEMID_ROOT);

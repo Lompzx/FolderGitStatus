@@ -8,6 +8,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.VisualStudio.Shell;
@@ -41,6 +42,8 @@ namespace FolderGitStatus
         private readonly Dictionary<Type, PropertyInfo> _wrapperProperties = new Dictionary<Type, PropertyInfo>();
         private readonly HashSet<Type> _reportedTypes = new HashSet<Type>();
         private readonly ConditionalWeakTable<TextBlock, OriginalLook> _originals = new ConditionalWeakTable<TextBlock, OriginalLook>();
+        private readonly ConditionalWeakTable<TextBlock, BadgeAdorner> _badges = new ConditionalWeakTable<TextBlock, BadgeAdorner>();
+        private const double IgnoredOpacity = 0.45;
         private Brush _addedBrush, _modifiedBrush, _conflictBrush;
         private Brush _committedAddedBrush, _committedModifiedBrush, _committedConflictBrush;
         private readonly HashSet<ListBox> _pendingSweeps = new HashSet<ListBox>();
@@ -115,19 +118,9 @@ namespace FolderGitStatus
             ThreadHelper.ThrowIfNotOnUIThread();
 
             _discoveryAttempts++;
-            var found = false;
-            foreach (Window window in Application.Current.Windows)
-            {
-                foreach (var treeView in VisualTree.Descendants<ListBox>(window).Where(IsHierarchyTreeView).ToList())
-                {
-                    found = true;
-                    if (TrackTreeView(treeView))
-                    {
-                        Log.Write($"Solution Explorer tree found after {_discoveryClock.Elapsed.TotalSeconds:0.0}s " +
-                            $"({_discoveryAttempts} attempt(s)): {treeView.GetType().FullName}");
-                    }
-                }
-            }
+            var found = FindAndTrackTrees(treeView =>
+                Log.Write($"Solution Explorer tree found after {_discoveryClock.Elapsed.TotalSeconds:0.0}s " +
+                    $"({_discoveryAttempts} attempt(s)): {treeView.GetType().FullName}"));
 
             if (found)
             {
@@ -141,6 +134,45 @@ namespace FolderGitStatus
             }
 
             return found;
+        }
+
+        /// <returns>True if any Solution Explorer tree exists (tracked before or now).</returns>
+        private bool FindAndTrackTrees(Action<ListBox> onNewTree)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var found = false;
+            foreach (Window window in Application.Current.Windows)
+            {
+                foreach (var treeView in VisualTree.Descendants<ListBox>(window).Where(IsHierarchyTreeView).ToList())
+                {
+                    found = true;
+                    if (TrackTreeView(treeView))
+                    {
+                        onNewTree(treeView);
+                    }
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// Called when a tool window is shown. Each "New Solution Explorer View" window has its own
+        /// tree, which the discovery (that stops at the first tree) would not find. The window's content
+        /// may load a moment after it is shown, so it is looked up twice.
+        /// </summary>
+        public void ScanForNewTrees(string reason)
+        {
+            foreach (var delay in new[] { 300, 1500 })
+            {
+                _uiThread.RunAsync(async () =>
+                {
+                    await System.Threading.Tasks.Task.Delay(delay);
+                    await _uiThread.SwitchToMainThreadAsync(alwaysYield: true);
+                    FindAndTrackTrees(treeView => Log.Write($"Another Solution Explorer tree found ({reason}): {treeView.GetType().FullName}"));
+                }).Task.FileAndForget("FolderGitStatus/ScanForNewTrees");
+            }
         }
 
         private void LogDiscovery(string message)
@@ -206,6 +238,7 @@ namespace FolderGitStatus
             generator.ItemsChanged += (s, e) => QueueSweep(treeView);
             treeView.Loaded += (s, e) => QueueSweep(treeView);
             treeView.Unloaded += (s, e) => OnTreeViewUnloaded(treeView);
+            treeView.IsKeyboardFocusWithinChanged += (s, e) => OnTreeViewFocusChanged(treeView);
             QueueSweep(treeView);
             return true;
         }
@@ -256,10 +289,44 @@ namespace FolderGitStatus
                 container.SetValue(IsHookedProperty, true);
                 container.DataContextChanged += OnContainerDataContextChanged;
                 container.Unloaded += (s, _) => _containers.Remove((FrameworkElement)s);
+                if (container is ListBoxItem item)
+                {
+                    item.Selected += OnContainerSelectionChanged;
+                    item.Unselected += OnContainerSelectionChanged;
+                }
             }
 
             _containers.Add(container);
             Apply(container);
+        }
+
+        private void OnContainerSelectionChanged(object sender, RoutedEventArgs e)
+        {
+            if (ReferenceEquals(e.OriginalSource, sender))
+            {
+                // After the selection style has been applied.
+                var container = (FrameworkElement)sender;
+                RunOnUIThread(() =>
+                {
+                    ThreadHelper.ThrowIfNotOnUIThread();
+                    Apply(container);
+                }, "SelectionApply");
+            }
+        }
+
+        /// <summary>
+        /// The selection highlight changes when the tree gains or loses the focus.
+        /// </summary>
+        private void OnTreeViewFocusChanged(ListBox treeView)
+        {
+            RunOnUIThread(() =>
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                foreach (var container in _containers.OfType<ListBoxItem>().Where(c => c.IsSelected).ToList())
+                {
+                    Apply(container);
+                }
+            }, "SelectionRepaint");
         }
 
         private void OnContainerDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -350,27 +417,165 @@ namespace FolderGitStatus
         {
             var brush = GetBrush(status);
 
-            if (brush == null)
+            // On a strong selection highlight (e.g. blue in the Dark and Blue themes) the status
+            // color would be unreadable, so the text keeps the theme's color there.
+            var readable = brush == null || IsReadable(label, brush);
+            var values = new Dictionary<DependencyProperty, object>
+            {
+                [TextBlock.ForegroundProperty] = readable ? brush : null,
+                [TextBlock.FontWeightProperty] = _options.UseBold && brush != null ? (object)FontWeights.Bold : null,
+                [TextBlock.FontStyleProperty] = _options.ItalicStaged && status.Staged ? (object)FontStyles.Italic : null,
+                [UIElement.OpacityProperty] = status.Ignored ? (object)IgnoredOpacity : null,
+                [FrameworkElement.ToolTipProperty] = _options.ShowTooltip ? status.Describe() : null,
+            };
+
+            if (values.Values.All(v => v == null))
             {
                 if (_originals.TryGetValue(label, out var original))
                 {
                     original.Restore(label);
                     _originals.Remove(label);
                 }
-
-                return;
-            }
-
-            var look = _originals.GetValue(label, l => new OriginalLook(l));
-            label.Foreground = brush;
-            if (_options.UseBold)
-            {
-                label.FontWeight = FontWeights.Bold;
             }
             else
             {
-                look.RestoreFontWeight(label);
+                var look = _originals.GetValue(label, l => new OriginalLook(l));
+                foreach (var pair in values)
+                {
+                    look.Set(label, pair.Key, pair.Value);
+                }
             }
+
+            UpdateBadge(label, GetBadgeText(status), readable ? brush : label.Foreground);
+        }
+
+        /// <summary>
+        /// On a selection highlight the status color is kept only if it stays about as readable as on
+        /// the tree's own background, or readable enough on its own (contrast ratio as in WCAG).
+        /// Subtle highlights (light gray in the VS 2026 themes) keep the color; strong ones (blue in
+        /// the Dark and Blue themes) fall back to the theme's text color.
+        /// </summary>
+        private const double MinimumContrast = 2.5;
+        private const double MinimumRelativeContrast = 0.75;
+
+        private static bool IsReadable(TextBlock label, Brush brush)
+        {
+            if (!(brush is SolidColorBrush solid))
+            {
+                return true;
+            }
+
+            FindBackgrounds(label, out var item, out var tree);
+            if (item == null || tree == null || item.Value == tree.Value)
+            {
+                return true;
+            }
+
+            var onItem = Contrast(solid.Color, item.Value);
+            return onItem >= MinimumContrast || onItem >= Contrast(solid.Color, tree.Value) * MinimumRelativeContrast;
+        }
+
+        /// <summary>
+        /// The first opaque background between the label and the tree (the selection or hover
+        /// highlight, if any) and the background the tree is drawn on.
+        /// </summary>
+        private static void FindBackgrounds(DependencyObject label, out Color? item, out Color? tree)
+        {
+            item = null;
+            tree = null;
+            var insideItem = true;
+
+            for (var current = VisualTreeHelper.GetParent(label); current != null; current = VisualTreeHelper.GetParent(current))
+            {
+                if (current is ListBox)
+                {
+                    insideItem = false;
+                }
+
+                Brush background;
+                switch (current)
+                {
+                    case Panel panel: background = panel.Background; break;
+                    case Border border: background = border.Background; break;
+                    case Control control: background = control.Background; break;
+                    default: background = null; break;
+                }
+
+                if (background is SolidColorBrush solid && solid.Color.A >= 0x80 && solid.Opacity >= 0.5)
+                {
+                    if (insideItem)
+                    {
+                        item = item ?? solid.Color;
+                    }
+                    else
+                    {
+                        tree = solid.Color;
+                        return;
+                    }
+                }
+            }
+        }
+
+        private static double Contrast(Color foreground, Color background)
+        {
+            var a = foreground.A / 255.0;
+            var blended = Color.FromRgb(
+                (byte)Math.Round(foreground.R * a + background.R * (1 - a)),
+                (byte)Math.Round(foreground.G * a + background.G * (1 - a)),
+                (byte)Math.Round(foreground.B * a + background.B * (1 - a)));
+
+            double l1 = Luminance(blended), l2 = Luminance(background);
+            return (Math.Max(l1, l2) + 0.05) / (Math.Min(l1, l2) + 0.05);
+        }
+
+        private static double Luminance(Color color)
+        {
+            double Channel(byte value)
+            {
+                var c = value / 255.0;
+                return c <= 0.03928 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+            }
+
+            return 0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
+        }
+
+        private string GetBadgeText(ItemStatus status)
+        {
+            switch (_options.Badge)
+            {
+                case BadgeStyle.Letter:
+                    return status.Letter;
+                case BadgeStyle.Count:
+                    var count = status.FileCount;
+                    return status.IsFile || count == 0 ? status.Letter : count.ToString(System.Globalization.CultureInfo.CurrentCulture);
+                default:
+                    return null;
+            }
+        }
+
+        private void UpdateBadge(TextBlock label, string text, Brush brush)
+        {
+            _badges.TryGetValue(label, out var badge);
+            if (text == null || brush == null)
+            {
+                badge?.Update(null, null);
+                return;
+            }
+
+            if (badge == null)
+            {
+                var layer = AdornerLayer.GetAdornerLayer(label);
+                if (layer == null)
+                {
+                    return;
+                }
+
+                badge = new BadgeAdorner(label);
+                layer.Add(badge);
+                _badges.Add(label, badge);
+            }
+
+            badge.Update(text, brush);
         }
 
         /// <summary>
@@ -504,34 +709,69 @@ namespace FolderGitStatus
         /// </summary>
         private sealed class OriginalLook
         {
-            private readonly object _foreground;
-            private readonly object _fontWeight;
+            private static readonly DependencyProperty[] Properties =
+            {
+                TextBlock.ForegroundProperty,
+                TextBlock.FontWeightProperty,
+                TextBlock.FontStyleProperty,
+                UIElement.OpacityProperty,
+                FrameworkElement.ToolTipProperty,
+            };
+
+            private readonly Dictionary<DependencyProperty, object> _values = new Dictionary<DependencyProperty, object>();
 
             public OriginalLook(TextBlock label)
             {
-                _foreground = label.ReadLocalValue(TextBlock.ForegroundProperty);
-                _fontWeight = label.ReadLocalValue(TextBlock.FontWeightProperty);
+                foreach (var property in Properties)
+                {
+                    _values[property] = label.ReadLocalValue(property);
+                }
             }
 
             public void Restore(TextBlock label)
             {
-                Restore(label, TextBlock.ForegroundProperty, _foreground);
-                Restore(label, TextBlock.FontWeightProperty, _fontWeight);
+                foreach (var pair in _values)
+                {
+                    Restore(label, pair.Key, pair.Value);
+                }
             }
 
-            public void RestoreFontWeight(TextBlock label) => Restore(label, TextBlock.FontWeightProperty, _fontWeight);
+            /// <summary>
+            /// Sets the value, or restores the original one when <paramref name="value"/> is null.
+            /// </summary>
+            public void Set(TextBlock label, DependencyProperty property, object value)
+            {
+                if (value != null)
+                {
+                    if (!Equals(label.ReadLocalValue(property), value))
+                    {
+                        label.SetValue(property, value);
+                    }
+                }
+                else if (_values.TryGetValue(property, out var original))
+                {
+                    Restore(label, property, original);
+                }
+            }
 
             private static void Restore(DependencyObject target, DependencyProperty property, object value)
             {
+                var current = target.ReadLocalValue(property);
                 if (value == DependencyProperty.UnsetValue)
                 {
-                    target.ClearValue(property);
+                    if (current != DependencyProperty.UnsetValue)
+                    {
+                        target.ClearValue(property);
+                    }
                 }
                 else if (value is BindingExpressionBase binding)
                 {
-                    BindingOperations.SetBinding(target, property, binding.ParentBindingBase);
+                    if (!(current is BindingExpressionBase currentBinding) || currentBinding.ParentBindingBase != binding.ParentBindingBase)
+                    {
+                        BindingOperations.SetBinding(target, property, binding.ParentBindingBase);
+                    }
                 }
-                else
+                else if (!Equals(current, value))
                 {
                     target.SetValue(property, value);
                 }

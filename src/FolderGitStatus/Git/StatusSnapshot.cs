@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,41 +7,77 @@ namespace FolderGitStatus
 {
     /// <summary>
     /// Immutable result of a "git status" (or of a "git diff" between commits): status per file
-    /// and, already propagated, per folder.
+    /// and, already propagated, per folder; plus the paths ignored by Git when they were requested.
     /// </summary>
     internal sealed class StatusSnapshot
     {
         public static readonly StatusSnapshot Empty = new StatusSnapshot(
-            new Dictionary<string, GitStatus>(PathUtil.Comparer),
-            new Dictionary<string, GitStatus>(PathUtil.Comparer));
+            new Dictionary<string, PathStatus>(PathUtil.Comparer),
+            new Dictionary<string, PathStatus>(PathUtil.Comparer),
+            new HashSet<string>(PathUtil.Comparer),
+            null);
 
-        private readonly Dictionary<string, GitStatus> _files;
-        private readonly Dictionary<string, GitStatus> _directories;
+        private readonly Dictionary<string, PathStatus> _files;
+        private readonly Dictionary<string, PathStatus> _directories;
+        private readonly HashSet<string> _ignored;
+        private readonly string _root;
 
-        private StatusSnapshot(Dictionary<string, GitStatus> files, Dictionary<string, GitStatus> directories)
+        private StatusSnapshot(Dictionary<string, PathStatus> files, Dictionary<string, PathStatus> directories,
+            HashSet<string> ignored, string root)
         {
             _files = files;
             _directories = directories;
+            _ignored = ignored;
+            _root = root;
         }
 
-        public GitStatus GetFileStatus(string path) =>
-            _files.TryGetValue(path, out var status) ? status : GitStatus.None;
+        public int FileCount => _files.Count;
 
-        public GitStatus GetDirectoryStatus(string path) =>
-            _directories.TryGetValue(path, out var status) ? status : GitStatus.None;
+        public PathStatus GetFile(string path) =>
+            path != null && _files.TryGetValue(path, out var status) ? status : null;
+
+        public PathStatus GetDirectory(string path) =>
+            path != null && _directories.TryGetValue(path, out var status) ? status : null;
+
+        public GitStatus GetFileStatus(string path) => GetFile(path)?.Kind ?? GitStatus.None;
+
+        public GitStatus GetDirectoryStatus(string path) => GetDirectory(path)?.Kind ?? GitStatus.None;
+
+        /// <summary>
+        /// True if the path, or a folder above it inside the repository, is ignored by Git.
+        /// </summary>
+        public bool IsIgnored(string path)
+        {
+            if (_ignored.Count == 0 || path == null || _root == null)
+            {
+                return false;
+            }
+
+            for (var current = path; current != null && current.Length > _root.Length; current = Path.GetDirectoryName(current))
+            {
+                if (_ignored.Contains(current))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         public bool HasSameContent(StatusSnapshot other) =>
-            SameContent(_files, other._files) && SameContent(_directories, other._directories);
+            SameContent(_files, other._files) && SameContent(_directories, other._directories) && _ignored.SetEquals(other._ignored);
 
         /// <summary>
         /// Parses the output of "git status --porcelain=v1 -z".
         /// Each entry is "XY path"; for renames/copies the next entry is the source path.
+        /// "!!" entries (with --ignored) are ignored paths; folders end with '/'.
         /// </summary>
         public static StatusSnapshot Parse(string root, string output)
         {
-            var files = new Dictionary<string, GitStatus>(PathUtil.Comparer);
-            var directories = new Dictionary<string, GitStatus>(PathUtil.Comparer);
-            var entries = output.Split(new[] { '\0' }, System.StringSplitOptions.RemoveEmptyEntries);
+            var files = new Dictionary<string, PathStatus>(PathUtil.Comparer);
+            var directories = new Dictionary<string, PathStatus>(PathUtil.Comparer);
+            var ignored = new HashSet<string>(PathUtil.Comparer);
+            var entries = output.Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries);
 
             for (var i = 0; i < entries.Length; i++)
             {
@@ -56,10 +93,18 @@ namespace FolderGitStatus
                     i++;
                 }
 
-                Add(files, directories, root, entry.Substring(3), Classify(x, y));
+                if (x == '!')
+                {
+                    ignored.Add(ToFullPath(root, entry.Substring(3)));
+                    continue;
+                }
+
+                var kind = Classify(x, y);
+                var staged = kind != GitStatus.Conflict && x != '?' && x != ' ' && y == ' ';
+                Add(files, directories, root, entry.Substring(3), kind, staged);
             }
 
-            return new StatusSnapshot(files, directories);
+            return new StatusSnapshot(files, directories, ignored, root);
         }
 
         /// <summary>
@@ -69,34 +114,30 @@ namespace FolderGitStatus
         /// </summary>
         public static StatusSnapshot ParseNameStatus(string root, string output)
         {
-            var files = new Dictionary<string, GitStatus>(PathUtil.Comparer);
-            var directories = new Dictionary<string, GitStatus>(PathUtil.Comparer);
-            var entries = output.Split(new[] { '\0' }, System.StringSplitOptions.RemoveEmptyEntries);
+            var files = new Dictionary<string, PathStatus>(PathUtil.Comparer);
+            var directories = new Dictionary<string, PathStatus>(PathUtil.Comparer);
 
-            for (var i = 0; i < entries.Length; i++)
+            foreach (var change in GitOutput.ParseNameStatus(output))
             {
-                var letter = entries[i][0];
-                i += letter == 'R' || letter == 'C' ? 2 : 1;
-                if (i >= entries.Length)
-                {
-                    break;
-                }
-
-                Add(files, directories, root, entries[i], letter == 'A' || letter == 'C' ? GitStatus.Added : GitStatus.Modified);
+                Add(files, directories, root, change.Path,
+                    change.Letter == 'A' || change.Letter == 'C' ? GitStatus.Added : GitStatus.Modified, staged: false);
             }
 
-            return new StatusSnapshot(files, directories);
+            return new StatusSnapshot(files, directories, new HashSet<string>(PathUtil.Comparer), root);
         }
 
-        private static void Add(Dictionary<string, GitStatus> files, Dictionary<string, GitStatus> directories,
-            string root, string relativePath, GitStatus status)
-        {
-            var path = Path.Combine(root, relativePath.Replace('/', '\\')).TrimEnd('\\');
+        private static string ToFullPath(string root, string relativePath) =>
+            Path.Combine(root, relativePath.Replace('/', '\\')).TrimEnd('\\');
 
-            Merge(files, path, status);
+        private static void Add(Dictionary<string, PathStatus> files, Dictionary<string, PathStatus> directories,
+            string root, string relativePath, GitStatus status, bool staged)
+        {
+            var path = ToFullPath(root, relativePath);
+
+            Merge(files, path, status, staged);
             for (var dir = Path.GetDirectoryName(path); dir != null && dir.Length >= root.Length; dir = Path.GetDirectoryName(dir))
             {
-                Merge(directories, dir, status);
+                Merge(directories, dir, status, staged);
             }
         }
 
@@ -110,15 +151,18 @@ namespace FolderGitStatus
             return x == '?' || x == 'A' ? GitStatus.Added : GitStatus.Modified;
         }
 
-        private static void Merge(Dictionary<string, GitStatus> map, string path, GitStatus status)
+        private static void Merge(Dictionary<string, PathStatus> map, string path, GitStatus status, bool staged)
         {
-            if (!map.TryGetValue(path, out var current) || status > current)
+            if (!map.TryGetValue(path, out var current))
             {
-                map[path] = status;
+                current = new PathStatus();
+                map[path] = current;
             }
+
+            current.Include(status, staged);
         }
 
-        private static bool SameContent(Dictionary<string, GitStatus> a, Dictionary<string, GitStatus> b) =>
-            a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out var status) && status == pair.Value);
+        private static bool SameContent(Dictionary<string, PathStatus> a, Dictionary<string, PathStatus> b) =>
+            a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out var status) && status.SameAs(pair.Value));
     }
 }

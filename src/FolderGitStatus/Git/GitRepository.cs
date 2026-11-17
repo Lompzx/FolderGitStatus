@@ -1,59 +1,58 @@
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
-using System.Text;
+using System.Linq;
 using System.Threading;
 
 namespace FolderGitStatus
 {
     /// <summary>
-    /// Keeps a repository's status up to date: watches the working tree and the index
-    /// and reruns "git status" (debounced) when something changes. With "Show branch changes"
-    /// on, it also lists the files changed by the commits of the current branch.
+    /// Keeps a repository's status up to date: watches the working tree and the Git directory
+    /// and reruns "git status" (debounced) when something changes. When branch changes are needed
+    /// (the option or the Solution Explorer filter), it also lists the files changed by the
+    /// commits of the current branch.
     /// </summary>
     internal sealed class GitRepository : IDisposable
     {
         private const int DebounceMilliseconds = 700;
         private const string StatusArguments = "--no-optional-locks status --porcelain=v1 -z --untracked-files=all";
 
-        // Folders that change all the time and are usually in .gitignore; watching them
-        // would trigger "git status" continuously during builds and while VS is open.
-        private static readonly string[] IgnoredSegments = { @"\.git\", @"\.vs\", @"\bin\", @"\obj\", @"\node_modules\" };
+        /// <summary>
+        /// Git config key with the base branch of one repository ("git config foldergitstatus.baseBranch develop").
+        /// </summary>
+        public const string BaseBranchConfigKey = "foldergitstatus.baseBranch";
 
         // Tried in this order when no base branch is configured and origin/HEAD is not set.
         private static readonly string[] BaseBranchCandidates = { "origin/main", "origin/master", "main", "master" };
 
         private readonly OptionsPage _options;
-        private readonly FileSystemWatcher _watcher;
+        private readonly Func<bool> _branchChangesNeeded;
+        private readonly List<FileSystemWatcher> _watchers = new List<FileSystemWatcher>();
         private readonly Timer _debounce;
         private readonly object _gate = new object();
         private volatile StatusSnapshot _snapshot = StatusSnapshot.Empty;
         private volatile StatusSnapshot _branchSnapshot = StatusSnapshot.Empty;
         private volatile bool _baseResolved;
-        private string _baseRef;
+        private volatile string _baseRef;
+        private volatile string[] _ignoredSegments;
+        private volatile string _gitDir;
+        private volatile string _commonDir;
+        private bool _gitDirsResolved;
         private string _loggedBase;
         private string _lastBranchError;
         private bool _running;
         private bool _pending;
         private bool _disposed;
 
-        public GitRepository(string root, OptionsPage options)
+        public GitRepository(string root, OptionsPage options, Func<bool> branchChangesNeeded)
         {
             Root = root;
             _options = options;
+            _branchChangesNeeded = branchChangesNeeded;
+            _gitDir = _commonDir = Path.Combine(root, ".git");
+            _ignoredSegments = GetIgnoredSegments();
             _debounce = new Timer(_ => Refresh(), null, Timeout.Infinite, Timeout.Infinite);
-
-            _watcher = new FileSystemWatcher(root)
-            {
-                IncludeSubdirectories = true,
-                InternalBufferSize = 64 * 1024,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
-            };
-            _watcher.Changed += OnFileSystemEvent;
-            _watcher.Created += OnFileSystemEvent;
-            _watcher.Deleted += OnFileSystemEvent;
-            _watcher.Renamed += OnFileSystemEvent;
-            _watcher.Error += (s, e) => ScheduleRefresh(DebounceMilliseconds);
+            _watchers.Add(CreateWatcher(root));
         }
 
         public string Root { get; }
@@ -65,15 +64,22 @@ namespace FolderGitStatus
 
         /// <summary>
         /// Changes committed on the current branch since it left the base branch
-        /// (empty with "Show branch changes" off).
+        /// (empty when branch changes are not needed).
         /// </summary>
         public StatusSnapshot BranchSnapshot => _branchSnapshot;
 
+        /// <summary>
+        /// Base branch the branch changes are compared with (null if not resolved or not found).
+        /// </summary>
+        public string BaseRef => _baseResolved ? _baseRef : null;
+
         public event EventHandler Changed;
+
+        private TimeSpan GitTimeout => TimeSpan.FromSeconds(Math.Max(5, _options.GitTimeoutSeconds));
 
         public void Start()
         {
-            _watcher.EnableRaisingEvents = true;
+            _watchers[0].EnableRaisingEvents = true;
             ScheduleRefresh(0);
         }
 
@@ -82,64 +88,150 @@ namespace FolderGitStatus
         /// </summary>
         public void Invalidate()
         {
+            _ignoredSegments = GetIgnoredSegments();
             _baseResolved = false;
             ScheduleRefresh(0);
+        }
+
+        private FileSystemWatcher CreateWatcher(string path)
+        {
+            var watcher = new FileSystemWatcher(path)
+            {
+                IncludeSubdirectories = true,
+                InternalBufferSize = 64 * 1024,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            };
+            watcher.Changed += OnFileSystemEvent;
+            watcher.Created += OnFileSystemEvent;
+            watcher.Deleted += OnFileSystemEvent;
+            watcher.Renamed += OnFileSystemEvent;
+            watcher.Error += (s, e) => ScheduleRefresh(DebounceMilliseconds);
+            return watcher;
+        }
+
+        private string[] GetIgnoredSegments()
+        {
+            var segments = GitOutput.ParseIgnoredFolders(_options.IgnoredFolders);
+            return segments.Length == 0 && _options.IgnoredFolders == null
+                ? GitOutput.ParseIgnoredFolders(GitOutput.DefaultIgnoredFolders)
+                : segments;
         }
 
         private void OnFileSystemEvent(object sender, FileSystemEventArgs e)
         {
             var oldPath = (e as RenamedEventArgs)?.OldFullPath;
-
-            // Commits, checkouts and fetches move the refs; the base branch may also appear
-            // (e.g. after the first fetch), so it is looked up again.
-            if (_options.ShowBranchChanges && (IsRefChange(e.FullPath) || IsRefChange(oldPath)))
+            var kind = Classify(e.FullPath);
+            if (oldPath != null)
             {
-                _baseResolved = false;
-                ScheduleRefresh(DebounceMilliseconds);
-            }
-            else if (IsRelevant(e.FullPath) || IsRelevant(oldPath))
-            {
-                ScheduleRefresh(DebounceMilliseconds);
-            }
-        }
-
-        private string GetRelativePath(string fullPath) =>
-            fullPath == null || fullPath.Length <= Root.Length ? null : fullPath.Substring(Root.Length);
-
-        private bool IsRefChange(string fullPath)
-        {
-            var relative = GetRelativePath(fullPath);
-            return relative != null && (
-                relative.StartsWith(@"\.git\refs\", StringComparison.OrdinalIgnoreCase) ||
-                relative.StartsWith(@"\.git\packed-refs", StringComparison.OrdinalIgnoreCase) ||
-                relative.Equals(@"\.git\HEAD", StringComparison.OrdinalIgnoreCase));
-        }
-
-        private bool IsRelevant(string fullPath)
-        {
-            var relative = GetRelativePath(fullPath);
-            if (relative == null)
-            {
-                return false;
-            }
-
-            // stage/unstage, commit, checkout and merge change the index or HEAD
-            if (relative.Equals(@"\.git\index", StringComparison.OrdinalIgnoreCase) ||
-                relative.Equals(@"\.git\HEAD", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            relative += "\\";
-            foreach (var segment in IgnoredSegments)
-            {
-                if (relative.IndexOf(segment, StringComparison.OrdinalIgnoreCase) >= 0)
+                var oldKind = Classify(oldPath);
+                if (oldKind > kind)
                 {
-                    return false;
+                    kind = oldKind;
                 }
             }
 
-            return true;
+            switch (kind)
+            {
+                case EventKind.RefOrConfig:
+                    // Commits, checkouts and fetches move the refs; the base branch may also appear
+                    // (e.g. after the first fetch) or be set in the git config, so it is looked up again.
+                    _baseResolved = false;
+                    ScheduleRefresh(DebounceMilliseconds);
+                    break;
+                case EventKind.Status:
+                    ScheduleRefresh(DebounceMilliseconds);
+                    break;
+            }
+        }
+
+        private enum EventKind
+        {
+            None,
+            Status,
+            RefOrConfig,
+        }
+
+        /// <summary>
+        /// The Git directory is usually "&lt;root&gt;\.git", but in worktrees and submodules ".git" is a
+        /// file that points elsewhere: the index and HEAD are in the Git directory, and the refs and
+        /// the config in the common directory (the main repository's ".git").
+        /// </summary>
+        private EventKind Classify(string fullPath)
+        {
+            if (fullPath == null)
+            {
+                return EventKind.None;
+            }
+
+            var gitDir = _gitDir;
+            var commonDir = _commonDir;
+
+            var inGitDir = GetRelative(fullPath, gitDir);
+            if (inGitDir != null)
+            {
+                // stage/unstage, commit, checkout and merge change the index or HEAD
+                if (inGitDir.Equals(@"\HEAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    return EventKind.RefOrConfig;
+                }
+
+                if (inGitDir.Equals(@"\index", StringComparison.OrdinalIgnoreCase))
+                {
+                    return EventKind.Status;
+                }
+            }
+
+            var inCommonDir = GetRelative(fullPath, commonDir);
+            if (inCommonDir != null)
+            {
+                return inCommonDir.StartsWith(@"\refs\", StringComparison.OrdinalIgnoreCase) ||
+                       inCommonDir.Equals(@"\packed-refs", StringComparison.OrdinalIgnoreCase) ||
+                       inCommonDir.Equals(@"\config", StringComparison.OrdinalIgnoreCase)
+                    ? EventKind.RefOrConfig
+                    : EventKind.None;
+            }
+
+            if (inGitDir != null)
+            {
+                return EventKind.None;
+            }
+
+            var relative = GetRelative(fullPath, Root);
+            if (relative == null)
+            {
+                return EventKind.None;
+            }
+
+            relative += "\\";
+            if (relative.StartsWith(@"\.git\", StringComparison.OrdinalIgnoreCase))
+            {
+                return EventKind.None;
+            }
+
+            foreach (var segment in _ignoredSegments)
+            {
+                if (relative.IndexOf(segment, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return EventKind.None;
+                }
+            }
+
+            return EventKind.Status;
+        }
+
+        /// <summary>
+        /// "\sub\file" for a path under <paramref name="directory"/>, otherwise null.
+        /// </summary>
+        private static string GetRelative(string fullPath, string directory)
+        {
+            if (directory == null || fullPath.Length <= directory.Length ||
+                fullPath[directory.Length] != '\\' ||
+                !fullPath.StartsWith(directory, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return fullPath.Substring(directory.Length);
         }
 
         private void ScheduleRefresh(int delay)
@@ -173,13 +265,21 @@ namespace FolderGitStatus
 
             try
             {
+                if (!_gitDirsResolved)
+                {
+                    _gitDirsResolved = true;
+                    ResolveGitDirectories();
+                }
+
                 var changed = false;
 
                 // --no-optional-locks keeps "git status" itself from rewriting the index
                 // (which would trigger the watcher and cause a refresh loop).
-                if (TryRunGit(StatusArguments, out var output, out var error))
+                var arguments = _options.DimIgnoredItems ? StatusArguments + " --ignored=matching" : StatusArguments;
+                var status = RunGit(arguments);
+                if (status.Success)
                 {
-                    var snapshot = StatusSnapshot.Parse(Root, output);
+                    var snapshot = StatusSnapshot.Parse(Root, status.Text);
                     if (!snapshot.HasSameContent(_snapshot))
                     {
                         _snapshot = snapshot;
@@ -188,7 +288,7 @@ namespace FolderGitStatus
                 }
                 else
                 {
-                    Log.Write($"git status failed in '{Root}': {error}");
+                    Log.Write($"git status failed in '{Root}': {status.Error}");
                 }
 
                 var branchSnapshot = GetBranchSnapshot();
@@ -226,139 +326,226 @@ namespace FolderGitStatus
         }
 
         /// <summary>
+        /// In worktrees and submodules the Git directory is outside the working tree (or inside
+        /// the parent repository's ".git", which the working tree watcher skips), so it gets its own
+        /// watcher; otherwise stage-only changes and commits would go unnoticed.
+        /// </summary>
+        private void ResolveGitDirectories()
+        {
+            var result = RunGit("rev-parse --absolute-git-dir --git-common-dir");
+            if (!result.Success)
+            {
+                return;
+            }
+
+            var lines = result.Text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length < 2)
+            {
+                return;
+            }
+
+            var gitDir = PathUtil.Normalize(lines[0].Trim());
+            var commonDir = lines[1].Trim();
+            commonDir = PathUtil.Normalize(Path.IsPathRooted(commonDir) ? commonDir : Path.Combine(Root, commonDir));
+            if (gitDir == null || commonDir == null)
+            {
+                return;
+            }
+
+            _gitDir = gitDir;
+            _commonDir = commonDir;
+
+            var defaultDir = Path.Combine(Root, ".git");
+            var watched = new List<string>();
+            foreach (var dir in new[] { commonDir, gitDir })
+            {
+                if (PathUtil.Comparer.Equals(dir, defaultDir) || watched.Any(w => IsSameOrUnder(dir, w)) || !Directory.Exists(dir))
+                {
+                    continue;
+                }
+
+                lock (_gate)
+                {
+                    if (_disposed)
+                    {
+                        return;
+                    }
+
+                    var watcher = CreateWatcher(dir);
+                    _watchers.Add(watcher);
+                    watcher.EnableRaisingEvents = true;
+                }
+
+                watched.Add(dir);
+                Log.Write($"Watching the Git directory of '{Root}': {dir}");
+            }
+        }
+
+        private static bool IsSameOrUnder(string path, string directory) =>
+            PathUtil.Comparer.Equals(path, directory) || GetRelative(path, directory) != null;
+
+        /// <summary>
         /// Files changed between the point where the branch left the base branch and HEAD
         /// ("git diff base...HEAD"). Returns null to keep the previous result when git fails.
         /// </summary>
         private StatusSnapshot GetBranchSnapshot()
         {
-            if (!_options.ShowBranchChanges)
+            if (!_branchChangesNeeded())
             {
-                _baseResolved = false;
                 _loggedBase = null;
                 return StatusSnapshot.Empty;
             }
 
-            if (!_baseResolved)
-            {
-                _baseResolved = true;
-                _baseRef = ResolveBaseRef();
-                var description = _baseRef ?? "(none)";
-                if (description != _loggedBase)
-                {
-                    _loggedBase = description;
-                    Log.Write(_baseRef == null
-                        ? $"Branch changes in '{Root}': no base branch found; set one under Tools > Options > Folder Git Status"
-                        : $"Branch changes in '{Root}': comparing with {_baseRef}");
-                }
-            }
-
-            if (_baseRef == null)
+            EnsureBaseResolved();
+            var baseRef = _baseRef;
+            if (baseRef == null)
             {
                 return StatusSnapshot.Empty;
             }
 
-            if (!TryRunGit($"--no-optional-locks diff --name-status -z --no-ext-diff {_baseRef}...HEAD --", out var output, out var error))
+            var result = RunGit($"--no-optional-locks diff --name-status -z --no-ext-diff {baseRef}...HEAD --");
+            if (!result.Success)
             {
-                if (error != _lastBranchError)
+                if (result.Error != _lastBranchError)
                 {
-                    _lastBranchError = error;
-                    Log.Write($"Failed to compare '{Root}' with {_baseRef}: {error}");
+                    _lastBranchError = result.Error;
+                    Log.Write($"Failed to compare '{Root}' with {baseRef}: {result.Error}");
                 }
 
                 return null;
             }
 
             _lastBranchError = null;
-            return StatusSnapshot.ParseNameStatus(Root, output);
+            return StatusSnapshot.ParseNameStatus(Root, result.Text);
+        }
+
+        private void EnsureBaseResolved()
+        {
+            if (_baseResolved)
+            {
+                return;
+            }
+
+            _baseRef = ResolveBaseRef(out var source);
+            _baseResolved = true;
+
+            var description = _baseRef == null ? "(none)" : $"{_baseRef} ({source})";
+            if (description != _loggedBase)
+            {
+                _loggedBase = description;
+                Log.Write(_baseRef == null
+                    ? $"Branch changes in '{Root}': no base branch found; set one under Tools > Options > Folder Git Status " +
+                      $"or with \"git config {BaseBranchConfigKey} <branch>\""
+                    : $"Branch changes in '{Root}': comparing with {description}");
+            }
         }
 
         /// <summary>
-        /// The configured base branch if it exists in this repository (the option applies to every
-        /// repository, which may use different names); otherwise the remote's default branch, or
-        /// the first of <see cref="BaseBranchCandidates"/> that exists.
+        /// The base branch set in this repository's git config, then the one in the options (which
+        /// applies to every repository, so it may not exist in all of them), then the remote's default
+        /// branch, then the first of <see cref="BaseBranchCandidates"/> that exists.
         /// </summary>
-        private string ResolveBaseRef()
+        private string ResolveBaseRef(out string source)
         {
-            var configured = _options.BaseBranch?.Trim();
+            var config = RunGit($"config --get {BaseBranchConfigKey}");
+            var configured = config.Success ? config.Text.Trim() : null;
             if (!string.IsNullOrEmpty(configured))
             {
-                if (IsSafeRefName(configured) && RefExists(configured))
+                if (GitOutput.IsSafeRefName(configured) && RefExists(configured))
                 {
+                    source = "git config";
+                    return configured;
+                }
+
+                Log.Write($"Base branch \"{configured}\" from the git config not found in '{Root}'");
+            }
+
+            configured = _options.BaseBranch?.Trim();
+            if (!string.IsNullOrEmpty(configured))
+            {
+                if (GitOutput.IsSafeRefName(configured) && RefExists(configured))
+                {
+                    source = "options";
                     return configured;
                 }
 
                 Log.Write($"Base branch \"{configured}\" not found in '{Root}'; detecting it automatically");
             }
 
-            if (TryRunGit("symbolic-ref --quiet --short refs/remotes/origin/HEAD", out var originHead, out _))
+            source = "detected";
+            var originHead = RunGit("symbolic-ref --quiet --short refs/remotes/origin/HEAD");
+            if (originHead.Success)
             {
-                originHead = originHead.Trim();
-                if (IsSafeRefName(originHead) && RefExists(originHead))
+                var name = originHead.Text.Trim();
+                if (GitOutput.IsSafeRefName(name) && RefExists(name))
                 {
-                    return originHead;
+                    return name;
                 }
             }
 
-            foreach (var candidate in BaseBranchCandidates)
-            {
-                if (RefExists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            return null;
+            return BaseBranchCandidates.FirstOrDefault(RefExists);
         }
 
-        private bool RefExists(string name) => TryRunGit($"rev-parse --verify --quiet {name}^{{commit}}", out _, out _);
+        private bool RefExists(string name) => RunGit($"rev-parse --verify --quiet {name}^{{commit}}").Success;
 
         /// <summary>
-        /// The name goes into a command line, so only characters valid in Git ref names are accepted.
+        /// Writes the version of <paramref name="fullPath"/> at the point where the current branch left
+        /// the base branch to a temporary file, for the "Compare with Base Branch" command.
+        /// Runs git, so call it from a background thread.
         /// </summary>
-        private static bool IsSafeRefName(string name)
+        public BaseVersion GetBaseVersion(string fullPath)
         {
-            if (name.Length == 0 || name[0] == '-' || name.Contains(".."))
+            EnsureBaseResolved();
+            var baseRef = _baseRef;
+            if (baseRef == null)
             {
-                return false;
+                throw new InvalidOperationException(
+                    $"No base branch found in '{Root}'. Set one under Tools > Options > Folder Git Status, " +
+                    $"or run \"git config {BaseBranchConfigKey} <branch>\" in the repository.");
             }
 
-            foreach (var c in name)
+            var mergeBase = RunGit($"merge-base {baseRef} HEAD");
+            if (!mergeBase.Success)
             {
-                if (!(char.IsLetterOrDigit(c) || c == '/' || c == '-' || c == '_' || c == '.'))
-                {
-                    return false;
-                }
+                throw new InvalidOperationException($"Could not find where the branch left {baseRef}: {mergeBase.Error}");
             }
 
-            return true;
+            var commit = mergeBase.Text.Trim();
+            var relativePath = GitOutput.ToGitPath(Root, fullPath);
+
+            // A file renamed on the branch is compared with its original name.
+            var diff = RunGit($"--no-optional-locks diff --name-status -z -M --no-ext-diff {commit} --");
+            var basePath = (diff.Success ? GitOutput.FindRenameSource(diff.Text, relativePath) : null) ?? relativePath;
+
+            var content = RunGit($"show {GitOutput.Quote(commit + ":" + basePath)}");
+            if (!content.Success)
+            {
+                // Windows paths are case-insensitive, git paths are not.
+                var tree = RunGit($"ls-tree -r -z --name-only {commit}");
+                var match = tree.Success
+                    ? tree.Text.Split('\0').FirstOrDefault(p => string.Equals(p, basePath, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                content = match != null ? RunGit($"show {GitOutput.Quote(commit + ":" + match)}") : null;
+            }
+
+            var directory = Path.Combine(Path.GetTempPath(), "FolderGitStatus", Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(directory);
+            var tempFile = Path.Combine(directory, Path.GetFileName(fullPath));
+            File.WriteAllBytes(tempFile, content?.Success == true ? content.Output : Array.Empty<byte>());
+
+            return new BaseVersion(tempFile, baseRef, commit.Substring(0, Math.Min(7, commit.Length)),
+                existed: content?.Success == true, renamedFrom: basePath != relativePath ? basePath : null);
         }
 
-        private bool TryRunGit(string arguments, out string output, out string error)
+        private GitProcess.Result RunGit(string arguments)
         {
-            var startInfo = new ProcessStartInfo(_options.GitExecutable, arguments)
+            var result = GitProcess.Run(_options.GitExecutable, Root, arguments, GitTimeout);
+            if (result.TimedOut)
             {
-                WorkingDirectory = Root,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-
-            using (var process = new Process { StartInfo = startInfo })
-            {
-                var errorText = new StringBuilder();
-                process.ErrorDataReceived += (s, e) => errorText.AppendLine(e.Data);
-                process.Start();
-                process.BeginErrorReadLine();
-
-                output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit();
-
-                error = errorText.ToString().Trim();
-                return process.ExitCode == 0;
+                Log.Write($"'{Root}': {result.Error}");
             }
+
+            return result;
         }
 
         public void Dispose()
@@ -366,10 +553,38 @@ namespace FolderGitStatus
             lock (_gate)
             {
                 _disposed = true;
+                foreach (var watcher in _watchers)
+                {
+                    watcher.Dispose();
+                }
             }
 
-            _watcher.Dispose();
             _debounce.Dispose();
         }
+    }
+
+    internal sealed class BaseVersion
+    {
+        public BaseVersion(string tempFile, string baseRef, string commit, bool existed, string renamedFrom)
+        {
+            TempFile = tempFile;
+            BaseRef = baseRef;
+            Commit = commit;
+            Existed = existed;
+            RenamedFrom = renamedFrom;
+        }
+
+        public string TempFile { get; }
+
+        public string BaseRef { get; }
+
+        public string Commit { get; }
+
+        /// <summary>
+        /// False when the file was created on the branch (the temporary file is empty).
+        /// </summary>
+        public bool Existed { get; }
+
+        public string RenamedFrom { get; }
     }
 }

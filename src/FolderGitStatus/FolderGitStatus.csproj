@@ -5,7 +5,7 @@
     <RootNamespace>FolderGitStatus</RootNamespace>
     <AssemblyName>FolderGitStatus</AssemblyName>
     <LangVersion>latest</LangVersion>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
 
     <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <None Include="source.extension.vsixmanifest" SubType="Designer" />
+    <VSCTCompile Include="FolderGitStatusPackage.vsct" ResourceName="Menus.ctmenu" />
     <Content Include="..\..\LICENSE" Link="LICENSE" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Resources\icon.png" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
@@ -34,6 +35,8 @@
     <Reference Include="WindowsBase" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="System.Design" />
   </ItemGroup>
 
   <ItemGroup>

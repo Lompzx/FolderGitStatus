@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Include href="KnownImageIds.vsct" />
+
+  <Commands package="guidFolderGitStatusPackage">
+    <Groups>
+      <!-- Solution Explorer toolbar -->
+      <Group guid="guidFolderGitStatusCmdSet" id="SolutionExplorerToolbarGroup" priority="0x0100">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_TOOL_PROJWIN" />
+      </Group>
+
+      <!-- Context menu of a file in Solution Explorer -->
+      <Group guid="guidFolderGitStatusCmdSet" id="ItemContextGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidFolderGitStatusCmdSet" id="ToggleBranchChangesId" priority="0x0100" type="Button">
+        <Parent guid="guidFolderGitStatusCmdSet" id="SolutionExplorerToolbarGroup" />
+        <Icon guid="ImageCatalogGuid" id="Branch" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>TextChanges</CommandFlag>
+        <CommandFlag>DontCache</CommandFlag>
+        <Strings>
+          <ButtonText>Show Branch Changes</ButtonText>
+          <ToolTipText>Show Branch Changes</ToolTipText>
+          <CanonicalName>.FolderGitStatus.ToggleBranchChanges</CanonicalName>
+          <LocCanonicalName>.FolderGitStatus.ToggleBranchChanges</LocCanonicalName>
+        </Strings>
+      </Button>
+
+      <!-- Toggled by the HierarchyTreeFilterProvider registered for this command (BranchChangesFilterProvider) -->
+      <Button guid="guidFolderGitStatusCmdSet" id="BranchChangesFilterId" priority="0x0500" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLBAR_PROJWIN_FILTERS" />
+        <Icon guid="ImageCatalogGuid" id="BranchContainsChanges" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Branch Changes Filter</ButtonText>
+          <ToolTipText>Show only the files changed on the current branch (committed or not)</ToolTipText>
+          <CanonicalName>.FolderGitStatus.BranchChangesFilter</CanonicalName>
+          <LocCanonicalName>.FolderGitStatus.BranchChangesFilter</LocCanonicalName>
+        </Strings>
+      </Button>
+
+      <Button guid="guidFolderGitStatusCmdSet" id="CompareWithBaseId" priority="0x0100" type="Button">
+        <Parent guid="guidFolderGitStatusCmdSet" id="ItemContextGroup" />
+        <Icon guid="ImageCatalogGuid" id="BranchCompare" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Compare with Base Branch</ButtonText>
+          <CanonicalName>.FolderGitStatus.CompareWithBaseBranch</CanonicalName>
+          <LocCanonicalName>.FolderGitStatus.CompareWithBaseBranch</LocCanonicalName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidFolderGitStatusPackage" value="{6BA26328-272B-41C6-8CED-BF383D5CCC6C}" />
+
+    <GuidSymbol name="guidFolderGitStatusCmdSet" value="{0D3E4B8C-5B0A-4E3B-9F1C-7A2F6C1D8E41}">
+      <IDSymbol name="SolutionExplorerToolbarGroup" value="0x1000" />
+      <IDSymbol name="ItemContextGroup" value="0x1001" />
+      <IDSymbol name="ToggleBranchChangesId" value="0x0100" />
+      <IDSymbol name="BranchChangesFilterId" value="0x0101" />
+      <IDSymbol name="CompareWithBaseId" value="0x0102" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Unit tests for the parts that do not depend on Visual Studio: the source files are linked
+       instead of referencing the VSIX project, so the tests build and run without the VS SDK. -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>FolderGitStatus.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\FolderGitStatus\Git\GitStatus.cs" Link="Linked\GitStatus.cs" />
+    <Compile Include="..\..\src\FolderGitStatus\Git\GitOutput.cs" Link="Linked\GitOutput.cs" />
+    <Compile Include="..\..\src\FolderGitStatus\Git\PathUtil.cs" Link="Linked\PathUtil.cs" />
+    <Compile Include="..\..\src\FolderGitStatus\Git\StatusSnapshot.cs" Link="Linked\StatusSnapshot.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
