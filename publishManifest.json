@@ -20,6 +20,18 @@
       "targetPath": "docs/images/branch-changes.gif"
     },
     {
+      "pathOnDisk": "docs/images/branch-toolbar.gif",
+      "targetPath": "docs/images/branch-toolbar.gif"
+    },
+    {
+      "pathOnDisk": "docs/images/compare-base.gif",
+      "targetPath": "docs/images/compare-base.gif"
+    },
+    {
+      "pathOnDisk": "docs/images/badges.gif",
+      "targetPath": "docs/images/badges.gif"
+    },
+    {
       "pathOnDisk": "docs/images/solution-explorer.png",
       "targetPath": "docs/images/solution-explorer.png"
     },
