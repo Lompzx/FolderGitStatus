@@ -44,6 +44,17 @@ Right-click a file in Solution Explorer and choose **Compare with Base Branch** 
 
 ![Compare with Base Branch on a file changed by the branch](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/compare-base.gif)
 
+### Compare with Last Commit and Compare with Previous Commit
+
+Two more commands on the context menu of a file, for the changes of the branch one step at a time:
+
+- **Compare with Last Commit**: the last commit (`HEAD`) against the working tree, so the diff shows only what is not committed yet, staged or not. It shows up on files with uncommitted changes; new files are compared with an empty file.
+- **Compare with Previous Commit**: what the last commit that changed the file did to it (the file before and after that commit, merge commits skipped). The commit message is in the header of the diff. It shows up on files that are already in a commit.
+
+Both follow renames, like *Compare with Base Branch*.
+
+![Compare with Last Commit shows only the uncommitted edit; Compare with Previous Commit shows what the last commit changed](https://raw.githubusercontent.com/Lompzx/FolderGitStatus/main/docs/images/compare-commits.gif)
+
 ### Badges, staged changes and ignored files
 
 - **Badge**: shows a letter (`M`, `A`, `C`) or, for folders, the number of changed files after the name, so the status does not depend on the color alone.
@@ -58,6 +69,7 @@ Right-click a file in Solution Explorer and choose **Compare with Base Branch** 
 ## Features
 
 - Optional branch mode: also shows, in a lighter tone, what the commits of the current branch changed compared to the base branch, with a toolbar button, a Solution Explorer filter and a *Compare with Base Branch* command.
+- *Compare with Last Commit* (only the uncommitted changes) and *Compare with Previous Commit* (what the last commit changed) on the context menu of a file.
 - Optional badges (letter or file count), summary tooltip, italic for staged changes and dimmed ignored files.
 - Recursive propagation up to the root: physical folders, projects, solution folders (including `.slnx`) and the solution node.
 - Automatic refresh when files are saved, created, deleted or renamed, and on stage, commit, checkout or merge.
@@ -107,7 +119,7 @@ Visual Studio has no public API to decorate Solution Explorer items. The extensi
 ## Known limitations
 
 - Items linked into a project from outside the project folder are not considered.
-- *Compare with Base Branch* is available on files of projects and solutions, not in *Open Folder* mode.
+- The *Compare with* commands are available on files of projects and solutions, not in *Open Folder* mode.
 - The integration relies on the internal structure of Solution Explorer, which may change in future Visual Studio versions. If the colors stop showing, turn on *Diagnostic log* and open an issue with the log contents.
 
 ## Building
@@ -135,7 +147,7 @@ GitHub Actions builds the VSIX and runs the tests on every push; pushing a `v*` 
 │   ├── Git/                    git status, file watching and per-folder propagation
 │   ├── SolutionExplorer/       Solution Explorer tree discovery, painting, badges and the Branch Changes filter
 │   ├── Resources/              extension icon
-│   ├── Commands.cs             toolbar button and Compare with Base Branch
+│   ├── Commands.cs             toolbar button and the Compare with commands
 │   ├── FolderGitStatusPackage.cs
 │   ├── FolderGitStatusPackage.vsct
 │   ├── OptionsPage.cs

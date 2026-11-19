@@ -28,6 +28,10 @@
       "targetPath": "docs/images/compare-base.gif"
     },
     {
+      "pathOnDisk": "docs/images/compare-commits.gif",
+      "targetPath": "docs/images/compare-commits.gif"
+    },
+    {
       "pathOnDisk": "docs/images/badges.gif",
       "targetPath": "docs/images/badges.gif"
     },

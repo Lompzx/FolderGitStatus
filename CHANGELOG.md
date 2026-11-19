@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-19
+
+### Added
+- **Compare with Last Commit** on the context menu of a file: opens the Visual Studio diff between the last commit (`HEAD`) and the working tree, so it shows only what is not committed yet (staged or not), instead of everything the branch changed. It shows up on files with uncommitted changes; new files are compared with an empty file and files renamed but not committed yet with their original name.
+- **Compare with Previous Commit** on the context menu of a file: opens the diff of the last commit that changed the file (the file before and after that commit; merge commits are skipped), with the commit message in the header. It follows renames made by that commit or not committed yet, and a file created in the first commit of the repository is compared with an empty file. It shows up on files that are already in a commit.
+
 ## [1.4.1] - 2026-11-17
 
 ### Fixed
@@ -82,6 +88,7 @@ First release.
 - Support for multiple repositories and submodules in the same solution, and for *Open Folder* mode.
 - Options for the colors, bold text, the path to `git.exe` and a diagnostic log.
 
+[1.5.0]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.5.0
 [1.4.1]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.4.1
 [1.4.0]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.4.0
 [1.3.0]: https://github.com/Lompzx/FolderGitStatus/releases/tag/v1.3.0

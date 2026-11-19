@@ -58,6 +58,32 @@
           <LocCanonicalName>.FolderGitStatus.CompareWithBaseBranch</LocCanonicalName>
         </Strings>
       </Button>
+
+      <Button guid="guidFolderGitStatusCmdSet" id="CompareWithLastCommitId" priority="0x0110" type="Button">
+        <Parent guid="guidFolderGitStatusCmdSet" id="ItemContextGroup" />
+        <Icon guid="ImageCatalogGuid" id="CompareFiles" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Compare with Last Commit</ButtonText>
+          <CanonicalName>.FolderGitStatus.CompareWithLastCommit</CanonicalName>
+          <LocCanonicalName>.FolderGitStatus.CompareWithLastCommit</LocCanonicalName>
+        </Strings>
+      </Button>
+
+      <Button guid="guidFolderGitStatusCmdSet" id="CompareWithPreviousCommitId" priority="0x0120" type="Button">
+        <Parent guid="guidFolderGitStatusCmdSet" id="ItemContextGroup" />
+        <Icon guid="ImageCatalogGuid" id="Commit" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Compare with Previous Commit</ButtonText>
+          <CanonicalName>.FolderGitStatus.CompareWithPreviousCommit</CanonicalName>
+          <LocCanonicalName>.FolderGitStatus.CompareWithPreviousCommit</LocCanonicalName>
+        </Strings>
+      </Button>
     </Buttons>
   </Commands>
 
@@ -70,6 +96,8 @@
       <IDSymbol name="ToggleBranchChangesId" value="0x0100" />
       <IDSymbol name="BranchChangesFilterId" value="0x0101" />
       <IDSymbol name="CompareWithBaseId" value="0x0102" />
+      <IDSymbol name="CompareWithLastCommitId" value="0x0103" />
+      <IDSymbol name="CompareWithPreviousCommitId" value="0x0104" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

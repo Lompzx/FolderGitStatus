@@ -493,7 +493,7 @@ namespace FolderGitStatus
         /// the base branch to a temporary file, for the "Compare with Base Branch" command.
         /// Runs git, so call it from a background thread.
         /// </summary>
-        public BaseVersion GetBaseVersion(string fullPath)
+        public FileVersion GetBaseVersion(string fullPath)
         {
             EnsureBaseResolved();
             var baseRef = _baseRef;
@@ -510,32 +510,133 @@ namespace FolderGitStatus
                 throw new InvalidOperationException($"Could not find where the branch left {baseRef}: {mergeBase.Error}");
             }
 
-            var commit = mergeBase.Text.Trim();
+            return GetVersionOfWorkingFile(fullPath, mergeBase.Text.Trim(), baseRef);
+        }
+
+        /// <summary>
+        /// Writes the version of <paramref name="fullPath"/> in the last commit (HEAD) to a temporary
+        /// file, for the "Compare with Last Commit" command: the diff shows only what is not committed.
+        /// Runs git, so call it from a background thread.
+        /// </summary>
+        public FileVersion GetHeadVersion(string fullPath)
+        {
+            var head = ResolveHead();
+            var branch = RunGit("rev-parse --abbrev-ref HEAD");
+            var name = branch.Success ? branch.Text.Trim() : null;
+            var label = !string.IsNullOrEmpty(name) && name != "HEAD" && GitOutput.IsSafeRefName(name) ? name : "HEAD";
+
+            return GetVersionOfWorkingFile(fullPath, head, label);
+        }
+
+        /// <summary>
+        /// Writes the file before and after the last commit that changed <paramref name="fullPath"/>
+        /// to temporary files, for the "Compare with Previous Commit" command. Merge commits are
+        /// skipped. Runs git, so call it from a background thread.
+        /// </summary>
+        public CommitChange GetLastCommitChange(string fullPath)
+        {
+            ResolveHead();
             var relativePath = GitOutput.ToGitPath(Root, fullPath);
 
-            // A file renamed on the branch is compared with its original name.
-            var diff = RunGit($"--no-optional-locks diff --name-status -z -M --no-ext-diff {commit} --");
-            var basePath = (diff.Success ? GitOutput.FindRenameSource(diff.Text, relativePath) : null) ?? relativePath;
-
-            var content = RunGit($"show {GitOutput.Quote(commit + ":" + basePath)}");
-            if (!content.Success)
+            // A rename not committed yet: the history is the one of the original name.
+            var diff = RunGit("--no-optional-locks diff --name-status -z -M --no-ext-diff HEAD --");
+            var headPath = ResolveTreePath("HEAD",
+                (diff.Success ? GitOutput.FindRenameSource(diff.Text, relativePath) : null) ?? relativePath);
+            if (headPath == null)
             {
-                // Windows paths are case-insensitive, git paths are not.
-                var tree = RunGit($"ls-tree -r -z --name-only {commit}");
-                var match = tree.Success
-                    ? tree.Text.Split('\0').FirstOrDefault(p => string.Equals(p, basePath, StringComparison.OrdinalIgnoreCase))
-                    : null;
-                content = match != null ? RunGit($"show {GitOutput.Quote(commit + ":" + match)}") : null;
+                throw new InvalidOperationException($"'{Path.GetFileName(fullPath)}' has not been committed yet.");
             }
+
+            var log = RunGit($"log -1 --no-merges --format=%H%x00%s HEAD -- {GitOutput.Quote(headPath)}");
+            var fields = log.Success ? log.Text.Trim().Split(new[] { '\0' }, 2) : null;
+            if (fields == null || fields[0].Length == 0)
+            {
+                throw new InvalidOperationException($"No commit that changed '{headPath}' was found. {log.Error}".Trim());
+            }
+
+            var commit = fields[0];
+            var subject = fields.Length > 1 ? fields[1].Trim() : string.Empty;
+            var after = WriteVersion(fullPath, relativePath, commit, ShortHash(commit), headPath);
+
+            // The first commit of the repository has no parent: the file was created there.
+            var parent = RunGit($"rev-parse --verify --quiet {commit}^");
+            if (!parent.Success)
+            {
+                return new CommitChange(WriteVersion(fullPath, relativePath, null, "(none)", headPath), after, subject);
+            }
+
+            // A file renamed by the commit is compared with its name before it.
+            var parentCommit = parent.Text.Trim();
+            var changes = RunGit($"--no-optional-locks diff --name-status -z -M --no-ext-diff {parentCommit} {commit} --");
+            var parentPath = (changes.Success ? GitOutput.FindRenameSource(changes.Text, headPath) : null) ?? headPath;
+            var before = WriteVersion(fullPath, relativePath, parentCommit, ShortHash(parentCommit), parentPath);
+
+            return new CommitChange(before, after, subject);
+        }
+
+        private string ResolveHead()
+        {
+            var head = RunGit("rev-parse --verify --quiet HEAD^{commit}");
+            if (!head.Success)
+            {
+                throw new InvalidOperationException($"The repository '{Root}' has no commits yet.");
+            }
+
+            return head.Text.Trim();
+        }
+
+        /// <summary>
+        /// The version of a working tree file in <paramref name="commit"/>. A file renamed since that
+        /// commit is taken with its original name.
+        /// </summary>
+        private FileVersion GetVersionOfWorkingFile(string fullPath, string commit, string label)
+        {
+            var relativePath = GitOutput.ToGitPath(Root, fullPath);
+            var diff = RunGit($"--no-optional-locks diff --name-status -z -M --no-ext-diff {commit} --");
+            var path = (diff.Success ? GitOutput.FindRenameSource(diff.Text, relativePath) : null) ?? relativePath;
+
+            return WriteVersion(fullPath, relativePath, commit, label, path);
+        }
+
+        /// <summary>
+        /// Writes the content of <paramref name="path"/> in <paramref name="commit"/> to a temporary file
+        /// with the name of <paramref name="fullPath"/> (so the diff picks the right language). The file
+        /// is empty when the path is not in the commit, or when <paramref name="commit"/> is null.
+        /// </summary>
+        /// <param name="currentPath">Path of the working tree file, to tell whether it was renamed.</param>
+        private FileVersion WriteVersion(string fullPath, string currentPath, string commit, string label, string path)
+        {
+            var treePath = commit != null ? ResolveTreePath(commit, path) : null;
+            var content = treePath != null ? RunGit($"show {GitOutput.Quote(commit + ":" + treePath)}") : null;
+            var existed = content?.Success == true;
 
             var directory = Path.Combine(Path.GetTempPath(), "FolderGitStatus", Guid.NewGuid().ToString("N").Substring(0, 8));
             Directory.CreateDirectory(directory);
             var tempFile = Path.Combine(directory, Path.GetFileName(fullPath));
-            File.WriteAllBytes(tempFile, content?.Success == true ? content.Output : Array.Empty<byte>());
+            File.WriteAllBytes(tempFile, existed ? content.Output : Array.Empty<byte>());
 
-            return new BaseVersion(tempFile, baseRef, commit.Substring(0, Math.Min(7, commit.Length)),
-                existed: content?.Success == true, renamedFrom: basePath != relativePath ? basePath : null);
+            var renamedFrom = existed && !string.Equals(treePath, currentPath, StringComparison.OrdinalIgnoreCase) ? treePath : null;
+            return new FileVersion(tempFile, label, commit != null ? ShortHash(commit) : null, existed, renamedFrom);
         }
+
+        /// <summary>
+        /// The path as stored in the commit, or null if it is not there. Windows paths are
+        /// case-insensitive, git paths are not.
+        /// </summary>
+        private string ResolveTreePath(string commit, string path)
+        {
+            if (RunGit($"cat-file -e {GitOutput.Quote(commit + ":" + path)}").Success)
+            {
+                return path;
+            }
+
+            var tree = RunGit($"ls-tree -r -z --name-only {commit}");
+            return tree.Success
+                ? tree.Text.Split('\0').FirstOrDefault(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase))
+                : null;
+        }
+
+        private static string ShortHash(string commit) => commit.Substring(0, Math.Min(7, commit.Length));
 
         private GitProcess.Result RunGit(string arguments)
         {
@@ -563,12 +664,15 @@ namespace FolderGitStatus
         }
     }
 
-    internal sealed class BaseVersion
+    /// <summary>
+    /// A version of a file in a commit, written to a temporary file for a comparison.
+    /// </summary>
+    internal sealed class FileVersion
     {
-        public BaseVersion(string tempFile, string baseRef, string commit, bool existed, string renamedFrom)
+        public FileVersion(string tempFile, string label, string commit, bool existed, string renamedFrom)
         {
             TempFile = tempFile;
-            BaseRef = baseRef;
+            Label = label;
             Commit = commit;
             Existed = existed;
             RenamedFrom = renamedFrom;
@@ -576,15 +680,43 @@ namespace FolderGitStatus
 
         public string TempFile { get; }
 
-        public string BaseRef { get; }
+        /// <summary>
+        /// Branch or short hash the version comes from.
+        /// </summary>
+        public string Label { get; }
 
+        /// <summary>
+        /// Short hash of the commit, or null when there is none (before the first commit).
+        /// </summary>
         public string Commit { get; }
 
         /// <summary>
-        /// False when the file was created on the branch (the temporary file is empty).
+        /// False when the file was not in the commit (the temporary file is empty).
         /// </summary>
         public bool Existed { get; }
 
+        /// <summary>
+        /// The path the file had in the commit (relative, with '/') when it was renamed since; otherwise null.
+        /// </summary>
         public string RenamedFrom { get; }
+    }
+
+    /// <summary>
+    /// A file before and after the commit that changed it.
+    /// </summary>
+    internal sealed class CommitChange
+    {
+        public CommitChange(FileVersion before, FileVersion after, string subject)
+        {
+            Before = before;
+            After = after;
+            Subject = subject;
+        }
+
+        public FileVersion Before { get; }
+
+        public FileVersion After { get; }
+
+        public string Subject { get; }
     }
 }
