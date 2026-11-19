@@ -2,7 +2,7 @@
   "$schema": "http://json.schemastore.org/vsix-publish",
   "categories": [ "source control", "coding" ],
   "identity": {
-    "internalName": "FolderGitStatus"
+    "internalName": "folder-git-status"
   },
   "overview": "README.md",
   "priceCategory": "free",
