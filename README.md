@@ -138,7 +138,7 @@ The unit tests (parsing of the git output and the status rules) don't need Visua
 dotnet test tests/FolderGitStatus.Tests
 ```
 
-GitHub Actions builds the VSIX and runs the tests on every push; pushing a `v*` tag also publishes it to the Marketplace (needs the `VS_MARKETPLACE_PAT` secret).
+GitHub Actions builds the VSIX and runs the tests on every push; pushing a `v*` tag also publishes it to the Marketplace (needs the `VS_MARKETPLACE_PAT` secret) and creates the GitHub release with the VSIX and the notes of that version from `CHANGELOG.md`.
 
 ## Repository layout
 
