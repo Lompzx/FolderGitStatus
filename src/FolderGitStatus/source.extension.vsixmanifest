@@ -8,7 +8,7 @@
     <License>LICENSE</License>
     <Icon>Resources\icon.png</Icon>
     <PreviewImage>Resources\icon.png</PreviewImage>
-    <Tags>git, solution explorer, folder, status, source control, decoration</Tags>
+    <Tags>git;solution explorer;folder;status;source control;decoration</Tags>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,19.0)">
